@@ -14,9 +14,13 @@ func _run() -> void:
 	var out_path: String = params.get("out", "renders/shot.png")
 	var city := CityScene.new(params)
 	root.add_child(city)
+	var t0 := Time.get_ticks_msec()
 	for i in range(SETTLE_FRAMES):
 		await process_frame
 	await RenderingServer.frame_post_draw
+	var settle_ms := Time.get_ticks_msec() - t0
+	print("[plat] settle: %d frames in %d ms (%.0f ms/frame)" % [
+			SETTLE_FRAMES, settle_ms, float(settle_ms) / SETTLE_FRAMES])
 	var img := root.get_viewport().get_texture().get_image()
 	var abs_out := ProjectSettings.globalize_path("res://" + out_path) \
 			if not out_path.begins_with("/") else out_path
@@ -58,6 +62,8 @@ func _parse_args() -> Dictionary:
 				p["cam_radius"] = float(val)
 			"out":
 				p["out"] = val
+			"gi":
+				p["gi"] = val == "on"
 			_:
 				printerr("[plat] unknown arg --", key)
 	return p

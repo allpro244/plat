@@ -12,6 +12,7 @@ export_presets.cfg
 /export/
 /renders/*.png
 !/renders/reference/*.png
+!/renders/ci/*.png
 
 # Node (web build tooling)
 node_modules/

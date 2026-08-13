@@ -171,10 +171,16 @@ static func _box(r: Dictionary, y0: float, y1: float) -> AABB:
 	return AABB(Vector3(r["x0"], y0, r["z0"]),
 			Vector3(r["x1"] - r["x0"], y1 - y0, r["z1"] - r["z0"]))
 
-## Party-wall rule, falling straight out of the lot geometry: the street face
-## and the rear face get windows, the lot-line flanks do not.
-static func _street_only_windows(_lot: Dictionary) -> Dictionary:
-	return {"n": true, "s": true, "e": false, "w": false}
+## Party-wall rule, falling straight out of the lot geometry: street faces and
+## the rear face get windows, lot-line flanks do not. A lot at the end of the
+## block fronts the CROSS STREET with its flank — that face is a street
+## frontage, not a party wall, so it gets windows too.
+static func _street_only_windows(lot: Dictionary) -> Dictionary:
+	return {
+		"n": true, "s": true,
+		"e": lot["x1"] >= BlockGen.BLOCK_HALF_X - 0.01,
+		"w": lot["x0"] <= -BlockGen.BLOCK_HALF_X + 0.01,
+	}
 
 static func _inset(tier: Dictionary, lot: Dictionary, front_in: float, side_in: float) -> Dictionary:
 	var t := {"x0": tier["x0"] + side_in, "x1": tier["x1"] - side_in}

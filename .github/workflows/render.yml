@@ -3,6 +3,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   shoot:
     runs-on: ubuntu-24.04
@@ -14,11 +17,28 @@ jobs:
       - name: Fetch pinned CC0 assets
         run: bash tools/fetch-assets.sh
       - name: Headless render
-        run: bash tools/shoot.sh --out=renders/ci.png
+        run: bash tools/shoot.sh --out=renders/ci/latest.png
       - name: Determinism gate
         run: bash tools/shoot.sh --check
       - name: Attach renders
         uses: actions/upload-artifact@v4
         with:
           name: renders
-          path: renders/*.png
+          path: |
+            renders/ci/*.png
+            renders/*.png
+      - name: Commit CI render back to the branch
+        # The CI runner reaches the primary asset CDN, which the dev sandbox
+        # cannot — committing the render back is how those images get seen.
+        # GITHUB_TOKEN pushes do not retrigger workflows, so this cannot loop.
+        run: |
+          git config user.name "ci-render"
+          git config user.email "ci-render@users.noreply.github.com"
+          git add -f renders/ci/latest.png
+          if git diff --cached --quiet; then
+            echo "render unchanged"
+          else
+            git commit -m "CI render for $GITHUB_SHA (primary asset profile)"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

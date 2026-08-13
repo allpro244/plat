@@ -29,9 +29,12 @@ done
 # lavapipe: pin the software Vulkan ICD so the render is the same everywhere.
 export VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/lvp_icd.json}
 
-# One-time project import so the script-class registry and shader caches
-# exist; cheap when already done.
-if [ ! -d .godot ]; then
+# Project import keeps the script-class registry current. A NEW class_name
+# that is not in the cache makes every dependent script fail to parse — and
+# the shoot then hangs instead of erroring — so re-import whenever any
+# script is newer than the cache.
+CACHE=.godot/global_script_class_cache.cfg
+if [ ! -f "$CACHE" ] || [ -n "$(find src -name '*.gd' -newer "$CACHE" 2>/dev/null | head -1)" ]; then
   "$GODOT" --path . --headless --import >/dev/null 2>&1 || true
 fi
 

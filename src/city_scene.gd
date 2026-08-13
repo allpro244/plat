@@ -20,14 +20,17 @@ var sky_sun_delta_deg := 0.0
 static func defaults() -> Dictionary:
 	return {
 		"seed": 1928,
-		# Place and moment. NYC City Hall latitude. The default time is not a
-		# taste choice: the pinned sky HDRI has its sun baked in at a measured
-		# 7.7 deg elevation, and 19.66 EDT on this date is when the computed
-		# solar elevation at this latitude matches it (7.68 deg). Sky and sun
-		# must agree — see _check_sky_sun_agreement.
+		# Place and moment. NYC City Hall latitude. "time": null means the
+		# default moment is DERIVED from the pinned sky: the sky's baked sun
+		# elevation is measured from the image and the clock time solved so
+		# the computed sun matches it. A sky can be rotated to any azimuth but
+		# its sun elevation is fixed at capture — so the honest default time
+		# of day is the time the sky was shot. Pass --time to override; the
+		# sky_delta warning then reports any disagreement.
 		"latitude": 40.7128, "longitude": -74.0060, "utc_offset": -4.0,
-		"year": 2026, "month": 6, "day": 21, "time": 19.66,
+		"year": 2026, "month": 6, "day": 21, "time": null,
 		"band": "near", "cam_azimuth": 222.0, "cam_height": 135.0, "cam_radius": 190.0,
+		"gi": false,
 	}
 
 func _init(p: Dictionary = {}) -> void:
@@ -39,6 +42,7 @@ func _ready() -> void:
 	_build_sun()
 	_build_ground()
 	_build_block()
+	add_child(ContextGen.build(int(params["seed"])))
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.set_band(params["band"])
@@ -47,11 +51,18 @@ func _ready() -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	var hdri_path := ASSET_DIR + "/sky/sky.hdr"
+	var baked := {}
+	var img: Image = null
+	if FileAccess.file_exists(hdri_path):
+		img = Image.load_from_file(hdri_path)
+		baked = _measure_hdri_sun(img)
+	if params["time"] == null:
+		params["time"] = _solve_time_for_elevation(
+				baked.get("elevation_deg", 40.0))
 	var sun := SunPosition.compute(params["year"], params["month"], params["day"],
 			params["time"], params["latitude"], params["longitude"], params["utc_offset"])
 	sun_info = sun
-	if FileAccess.file_exists(hdri_path):
-		var img := Image.load_from_file(hdri_path)
+	if img != null:
 		var sky_tex := ImageTexture.create_from_image(img)
 		var sky_mat := PanoramaSkyMaterial.new()
 		sky_mat.panorama = sky_tex
@@ -62,7 +73,6 @@ func _build_environment() -> void:
 		# Rotate the panorama so its baked sun sits at the computed azimuth.
 		# The HDRI's own sun position is measured from the image, so this stays
 		# true for whatever sky the fetch script pins.
-		var baked: Dictionary = _measure_hdri_sun(img)
 		env.sky_rotation = Vector3(0.0,
 				deg_to_rad(baked["azimuth_deg"] - sun["azimuth_deg"]), 0.0)
 		_check_sky_sun_agreement(baked, sun)
@@ -73,14 +83,31 @@ func _build_environment() -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.6, 0.7, 0.8)
 		env.ambient_light_energy = 1.0
+	# The pinned sky is a rural field, so its ground half bounces green-brown
+	# into every shadow — wrong context for a street canyon, where bounce
+	# comes off masonry and asphalt. Blend the sky ambient toward neutral to
+	# correct the cast; goes away entirely once an urban-horizon sky is pinned.
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_sky_contribution = 0.72
+	env.ambient_light_color = Color(0.72, 0.72, 0.74)
+	env.ambient_light_energy = 1.0
 	# Distance haze: softens the HDRI horizon and gives the skyline depth.
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.75, 0.78, 0.82)
-	env.fog_density = 0.00012
+	env.fog_density = 0.00009
 	env.fog_sky_affect = 0.22
 	env.fog_aerial_perspective = 0.6
+	if params.get("gi", false):
+		# SDFGI: real-time GI from signed distance fields. The cost of this on
+		# software Vulkan is THE number that decides where beauty renders run.
+		env.sdfgi_enabled = true
+		env.sdfgi_use_occlusion = true
+		env.sdfgi_min_cell_size = 0.5
+		env.sdfgi_cascades = 4
+		env.sdfgi_bounce_feedback = 0.7
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 6.0
+	env.tonemap_exposure = 1.12
 	env.ssao_enabled = true
 	env.ssao_intensity = 2.0
 	var we := WorldEnvironment.new()
@@ -116,6 +143,24 @@ func _measure_hdri_sun(img: Image) -> Dictionary:
 		"azimuth_deg": fposmod((float(best_x) / 256.0) * 360.0 + 180.0, 360.0),
 		"elevation_deg": 90.0 - (float(best_y) + 0.5) / 128.0 * 180.0,
 	}
+
+## Solve for the afternoon/evening clock time at which the computed solar
+## elevation matches the sky's baked sun. Afternoon branch by convention (a
+## sunrise sky serves as an evening one mirrored about noon; the image cannot
+## tell). Scans at 36 s steps — well under the tolerance.
+func _solve_time_for_elevation(el_target: float) -> float:
+	var best_t := 12.0
+	var best_d := 999.0
+	var t := 12.0
+	while t <= 21.5:
+		var sun := SunPosition.compute(params["year"], params["month"], params["day"],
+				t, params["latitude"], params["longitude"], params["utc_offset"])
+		var d: float = absf(sun["elevation_deg"] - el_target)
+		if d < best_d:
+			best_d = d
+			best_t = t
+		t += 0.01
+	return best_t
 
 ## A panorama can be rotated to any azimuth but its sun elevation is baked in,
 ## so a sky and a computed sun can silently disagree about the time of day.

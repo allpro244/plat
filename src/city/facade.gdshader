@@ -7,8 +7,10 @@ render_mode cull_back;
 uniform sampler2D wall_albedo : source_color, repeat_enable, filter_linear_mipmap;
 uniform sampler2D wall_normal : hint_normal, repeat_enable, filter_linear_mipmap;
 uniform sampler2D wall_ao : hint_default_white, repeat_enable, filter_linear_mipmap;
-// Scan tiles per meter. The brick scan reads correctly at ~5.5 m coverage.
-uniform float wall_uv_scale = 0.18;
+// Scan tiles per meter. The scan shows ~28 brick courses; at 65 mm nominal
+// course height that is ~2 m of wall per tile, so 0.5 tiles/m reads at true
+// brick scale. 0.18 made every brick the size of a boulder.
+uniform float wall_uv_scale = 0.5;
 uniform float wall_roughness : hint_range(0.0, 1.0) = 0.85;
 uniform float wall_metallic : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 wall_tint : source_color = vec4(1.0);
