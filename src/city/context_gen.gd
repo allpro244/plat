@@ -2,12 +2,14 @@ class_name ContextGen
 ## The rest of the city, tiered by distance from the hero block — the Scale
 ## phase's answer to "does it run" before per-building detail gets expensive.
 ##
-## Tiers (Chebyshev ring around the hero block):
-##   ring 1      NEAR — one merged mesh per block, one windowed-shader surface
-##               per mass (per-mass tint via vertex color).
-##   rings 2..4  MID  — one merged mesh + ONE windowed material per block;
+## Consumes CityPlan.blocks: world-placed, possibly ROTATED block footprints
+## from several grid domains. Masses are generated in the block's local frame
+## and transformed out, so a turned grid costs nothing extra.
+##
+## Tiers (by distance from the hero block):
+##   < NEAR_R    one merged mesh per block, windowed facade shader,
 ##               per-mass tint via vertex color.
-##   rings 5..R  FAR  — three blocks merged per instance, plain vertex-color
+##   otherwise   FAR — three blocks merged per instance, plain vertex-color
 ##               material, no window shader. Impostor tier: silhouette and
 ##               value only, which is all the far band can resolve.
 ##
@@ -17,7 +19,7 @@ class_name ContextGen
 
 const FACADE_SHADER := preload("res://src/city/facade.gdshader")
 
-const RINGS := CityPlan.RINGS
+const NEAR_R := 850.0   # windowed-tier radius, meters (~old rings 1-4)
 
 static var _wall_tex := {}
 
@@ -26,27 +28,20 @@ static func build(seed_value: int, matlib: Dictionary, plan: CityPlan) -> Node3D
 	var root := Node3D.new()
 	var far_st := _st()   # accumulates FAR tier geometry, flushed in batches
 	var far_count := 0
-	for gy in range(-RINGS, RINGS + 1):
-		for gx in range(-RINGS, RINGS + 1):
-			var cell := Vector2i(gx, gy)
-			var ring := maxi(absi(gx), absi(gy))
-			if ring == 0:
-				continue  # the hero block
-			if plan.cell_type[cell] != "blocks":
-				continue  # parks and water carry no massing
-			# Per-block RNG: one block's rules never reshuffle another's.
-			var rng := RandomNumberGenerator.new()
-			rng.seed = hash("%d/ctx/%d/%d" % [seed_value, gx, gy])
-			var x0: float = plan.col_x0[gx]
-			var z0: float = plan.row_z0[gy]
-			if ring <= 4:
-				root.add_child(_block_windowed(rng, x0, z0, cell, plan))
-			else:
-				_block_far(far_st, rng, x0, z0, cell, plan)
-				far_count += 1
-				if far_count % 3 == 0:
-					root.add_child(_flush_far(far_st))
-					far_st = _st()
+	for b in plan.blocks:
+		# Per-block RNG: one block's rules never reshuffle another's.
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("%d/ctx/%s" % [seed_value, b["key"]])
+		var xf := Transform3D(Basis(Vector3.UP, -float(b["angle"])),
+				Vector3(float(b["x"]), 0.0, float(b["z"])))
+		if float(b["dist"]) < NEAR_R:
+			root.add_child(_block_windowed(rng, b, xf, plan))
+		else:
+			_block_far(far_st, rng, b, xf, plan)
+			far_count += 1
+			if far_count % 3 == 0:
+				root.add_child(_flush_far(far_st))
+				far_st = _st()
 	if far_count % 3 != 0:
 		root.add_child(_flush_far(far_st))
 	return root
@@ -59,15 +54,17 @@ static func _st() -> SurfaceTool:
 	st.set_smooth_group(-1)
 	return st
 
-## Masses for one block: [x, z, w, d, h]. District params set footprint and
-## height character; the core-distance falloff shapes the skyline.
-static func _masses(rng: RandomNumberGenerator, x0: float, z0: float,
-		cell: Vector2i, plan: CityPlan) -> Array:
+## Masses for one block, in the block's LOCAL frame (origin at block center):
+## [x, z, w, d, h]. District params set footprint and height character; the
+## core-distance falloff shapes the skyline.
+static func _masses(rng: RandomNumberGenerator, b: Dictionary, plan: CityPlan) -> Array:
 	var out := []
-	var p := plan.params(cell)
-	var x := x0
-	var x1 := x0 + CityPlan.BLOCK_W
-	var falloff: float = plan.falloff(cell) * p["height_mul"]
+	var p := plan.params_for(b)
+	var bw: float = b["w"]
+	var bd: float = b["d"]
+	var x := -bw * 0.5
+	var x1 := bw * 0.5
+	var falloff: float = plan.falloff(b) * p["height_mul"]
 	var wmin: float = p["mass_w"][0]
 	var wmax: float = p["mass_w"][1]
 	while x < x1 - 8.0:
@@ -84,39 +81,39 @@ static func _masses(rng: RandomNumberGenerator, x0: float, z0: float,
 		else:
 			h = rng.randf_range(80.0, 150.0) * maxf(falloff, 0.7)  # outlier tower
 		h = clampf(h, 7.0, p["cap"])
-		var d := rng.randf_range(40.0, CityPlan.BLOCK_D)
-		var bw := w - rng.randf_range(0.5, 3.0)
-		out.append([x + (w - bw) * 0.5, z0 + CityPlan.BLOCK_D * 0.5 - d * 0.5, bw, d, h])
+		var d := rng.randf_range(minf(40.0, bd - 6.0), bd - 2.0)
+		var mw := w - rng.randf_range(0.5, 3.0)
+		out.append([x + (w - mw) * 0.5, -d * 0.5, mw, d, h])
 		x += w
 	return out
 
-static func _emit_mass(st: SurfaceTool, m: Array, tint: Color) -> void:
+static func _emit_mass(st: SurfaceTool, m: Array, tint: Color, xf: Transform3D) -> void:
 	var ax: float = m[0]
 	var az: float = m[1]
 	var w: float = m[2]
 	var d: float = m[3]
 	var h: float = m[4]
 	st.set_color(tint)
-	_wall(st, Vector3(ax + w, 0, az), Vector3(ax, 0, az), h)
-	_wall(st, Vector3(ax, 0, az + d), Vector3(ax + w, 0, az + d), h)
-	_wall(st, Vector3(ax + w, 0, az + d), Vector3(ax + w, 0, az), h)
-	_wall(st, Vector3(ax, 0, az), Vector3(ax, 0, az + d), h)
-	_top(st, ax, az, w, d, h)
+	_wall(st, xf, Vector3(ax + w, 0, az), Vector3(ax, 0, az), h)
+	_wall(st, xf, Vector3(ax, 0, az + d), Vector3(ax + w, 0, az + d), h)
+	_wall(st, xf, Vector3(ax + w, 0, az + d), Vector3(ax + w, 0, az), h)
+	_wall(st, xf, Vector3(ax, 0, az), Vector3(ax, 0, az + d), h)
+	_top(st, xf, ax, az, w, d, h)
 
 # --- tiers ------------------------------------------------------------------
 
-static func _block_windowed(rng: RandomNumberGenerator, x0: float, z0: float,
-		cell: Vector2i, plan: CityPlan) -> MeshInstance3D:
+static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
+		xf: Transform3D, plan: CityPlan) -> MeshInstance3D:
 	var st := _st()
-	var p := plan.params(cell)
+	var p := plan.params_for(b)
 	var tints: Array = p["tints"]
-	var ring := maxi(absi(cell.x), absi(cell.y))
-	for m in _masses(rng, x0, z0, cell, plan):
-		# Ring 1 south of the hero sits between it and the sun-derived
-		# camera: keep it low so background never blocks subject.
-		if ring == 1 and z0 > 31.0 and m[4] > 30.0:
+	var near_hero: bool = float(b["dist"]) < 300.0
+	for m in _masses(rng, b, plan):
+		# Blocks just south of the hero sit between it and the sun-derived
+		# camera: keep them low so background never blocks subject.
+		if near_hero and float(b["z"]) > 31.0 and m[4] > 30.0:
 			m[4] = rng.randf_range(18.0, 30.0)
-		_emit_mass(st, m, tints[rng.randi_range(0, tints.size() - 1)])
+		_emit_mass(st, m, tints[rng.randi_range(0, tints.size() - 1)], xf)
 	st.generate_normals()
 	st.generate_tangents()
 	var mi := MeshInstance3D.new()
@@ -141,11 +138,11 @@ static func _block_windowed(rng: RandomNumberGenerator, x0: float, z0: float,
 	mi.material_override = mat
 	return mi
 
-static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, x0: float, z0: float,
-		cell: Vector2i, plan: CityPlan) -> void:
-	var tints: Array = plan.params(cell)["tints"]
-	for m in _masses(rng, x0, z0, cell, plan):
-		_emit_mass(st, m, (tints[rng.randi_range(0, tints.size() - 1)] as Color) * 0.9)
+static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, b: Dictionary,
+		xf: Transform3D, plan: CityPlan) -> void:
+	var tints: Array = plan.params_for(b)["tints"]
+	for m in _masses(rng, b, plan):
+		_emit_mass(st, m, (tints[rng.randi_range(0, tints.size() - 1)] as Color) * 0.9, xf)
 
 static var _far_mat: StandardMaterial3D
 
@@ -163,17 +160,17 @@ static func _flush_far(st: SurfaceTool) -> MeshInstance3D:
 
 # --- geometry ---------------------------------------------------------------
 
-static func _wall(st: SurfaceTool, bl: Vector3, br: Vector3, h: float) -> void:
+static func _wall(st: SurfaceTool, xf: Transform3D, bl: Vector3, br: Vector3, h: float) -> void:
 	var w := (br - bl).length()
 	var u := Vector3.UP * h
 	for pair in [[bl + u, Vector2(0, h)], [br + u, Vector2(w, h)], [br, Vector2(w, 0)],
 			[bl + u, Vector2(0, h)], [br, Vector2(w, 0)], [bl, Vector2(0, 0)]]:
 		st.set_uv(pair[1])
-		st.add_vertex(pair[0])
+		st.add_vertex(xf * (pair[0] as Vector3))
 
-static func _top(st: SurfaceTool, ax: float, az: float, w: float, d: float, h: float) -> void:
+static func _top(st: SurfaceTool, xf: Transform3D, ax: float, az: float, w: float, d: float, h: float) -> void:
 	var pts := [Vector3(ax, h, az), Vector3(ax + w, h, az),
 			Vector3(ax + w, h, az + d), Vector3(ax, h, az + d)]
 	for i in [0, 1, 2, 0, 2, 3]:
 		st.set_uv(Vector2(pts[i].x, pts[i].z))
-		st.add_vertex(pts[i])
+		st.add_vertex(xf * (pts[i] as Vector3))

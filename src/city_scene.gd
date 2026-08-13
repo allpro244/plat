@@ -241,7 +241,9 @@ func _build_ground() -> void:
 	# Streets: one large asphalt plane under everything. The scan tiles at
 	# ~6 m so aggregate reads as texture, not gravel, from the near band.
 	var asphalt := _ground_material("asphalt", Color(0.21, 0.21, 0.215), 0.92, 6.0)
-	_slab(Vector2(-2700, -2700), Vector2(2700, 2700), 0.0, asphalt)
+	# Out to the fog horizon from the far band, so the sky photo's ground
+	# never shows past the city edge.
+	_slab(Vector2(-9000, -9000), Vector2(9000, 9000), 0.0, asphalt)
 	# Sidewalks: a concrete apron around the block at curb height.
 	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
 	var hx := BlockGen.BLOCK_HALF_X
@@ -254,29 +256,40 @@ func _build_ground() -> void:
 	_slab(Vector2(-hx - BlockGen.CROSS_STREET_WIDTH - 9, -hz - 40), Vector2(-hx - BlockGen.CROSS_STREET_WIDTH - 4.5, hz + 40), 0.12, walk)
 	_slab(Vector2(hx + BlockGen.CROSS_STREET_WIDTH + 4.5, -hz - 40), Vector2(hx + BlockGen.CROSS_STREET_WIDTH + 9, hz + 40), 0.12, walk)
 
-## Parks and water from the city plan. A park is mown ground with a sidewalk
-## apron; water is a flat reflective plane slightly below street level.
+## Parks and water from the city plan. A park is mown ground aligned to its
+## domain's grid; water is one reflective plane covering the half-plane
+## beyond the (angled) shoreline.
 func _build_plan_features(plan: CityPlan) -> void:
 	var grass := StandardMaterial3D.new()
 	grass.albedo_color = Color(0.30, 0.37, 0.24)
 	grass.roughness = 1.0
-	var water := StandardMaterial3D.new()
-	water.albedo_color = Color(0.08, 0.12, 0.15)
-	water.roughness = 0.03
-	water.metallic = 0.4
-	for cell in plan.cell_type:
-		var x0: float = plan.col_x0[cell.x]
-		var z0: float = plan.row_z0[cell.y]
-		match plan.cell_type[cell]:
-			"park":
-				_slab(Vector2(x0 - 3.0, z0 - 3.0),
-						Vector2(x0 + CityPlan.BLOCK_W + 3.0, z0 + CityPlan.BLOCK_D + 3.0),
-						0.10, grass)
-			"water":
-				# Slightly proud slab per cell; the seam is under fog range.
-				_slab(Vector2(x0 - 30.0, z0 - 20.0),
-						Vector2(x0 + CityPlan.BLOCK_W + 30.0, z0 + CityPlan.BLOCK_D + 20.0),
-						0.04, water)
+	for pk in plan.parks:
+		_slab_rot(pk["center"], Vector2(float(pk["w"]) + 6.0, float(pk["d"]) + 6.0),
+				float(pk["angle"]), 0.10, grass)
+	if not plan.water.is_empty():
+		var water := StandardMaterial3D.new()
+		water.albedo_color = Color(0.08, 0.12, 0.15)
+		water.roughness = 0.03
+		water.metallic = 0.4
+		# One huge slab whose near edge lies on the shoreline: dot(p,n)=d.
+		# Sized so its far corners sit beyond the fog horizon from any band.
+		var n: Vector2 = plan.water["n"]
+		var d: float = plan.water["d"]
+		_slab_rot(n * (d + 9000.0), Vector2(18000.0, 24000.0),
+				atan2(n.y, n.x), 0.04, water)
+
+## A slab centered at `center` with plan-frame X size size.x / Z size size.y,
+## turned by `angle` (the plan's rotation convention: local +X maps to world
+## (cos angle, sin angle) in the XZ plane).
+func _slab_rot(center: Vector2, size: Vector2, angle: float, top_y: float, mat: Material) -> void:
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(size.x, maxf(top_y, 0.02), size.y)
+	mi.mesh = box
+	mi.material_override = mat
+	mi.rotation.y = -angle
+	mi.position = Vector3(center.x, maxf(top_y, 0.02) * 0.5 - 0.011, center.y)
+	add_child(mi)
 
 func _slab(a: Vector2, b: Vector2, top_y: float, mat: Material) -> void:
 	var mi := MeshInstance3D.new()
