@@ -178,6 +178,43 @@ static func _box(st: SurfaceTool, xf: Transform3D, x: float, z: float,
 	_wall(st, xf, Vector3(x, y, z), Vector3(x, y, z + d), h)
 	_top(st, xf, x, z, w, d, y + h)
 
+## Arbitrary-plan prism: CCW footprint points, walls + centroid-fan top.
+## This is what frees buildings from the rectangle.
+static func _prism(st: SurfaceTool, xf: Transform3D, pts: Array, y0: float, h: float) -> void:
+	var n := pts.size()
+	var cx := 0.0
+	var cz := 0.0
+	for q in pts:
+		cx += (q as Vector2).x
+		cz += (q as Vector2).y
+	var c := Vector2(cx / float(n), cz / float(n))
+	for i in range(n):
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % n]
+		_wall(st, xf, Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), h)
+	for i in range(n):
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % n]
+		for q in [Vector3(c.x, y0 + h, c.y), Vector3(a.x, y0 + h, a.y),
+				Vector3(b.x, y0 + h, b.y)]:
+			st.set_uv(Vector2(q.x, q.z))
+			st.set_uv2(_uv2)
+			st.add_vertex(xf * q)
+
+## Chamfered rectangle: the four corners cut at 45 deg — the classic prewar
+## corner treatment, and an octagonal silhouette against the sky.
+static func _chamfer_pts(x: float, z: float, w: float, d: float, c: float) -> Array:
+	return [Vector2(x + c, z), Vector2(x + w - c, z), Vector2(x + w, z + c),
+			Vector2(x + w, z + d - c), Vector2(x + w - c, z + d),
+			Vector2(x + c, z + d), Vector2(x, z + d - c), Vector2(x, z + c)]
+
+## Projecting cornice: a band standing proud of the facade at the top —
+## the shadow line that caps a masonry building.
+static func _cornice(roof: SurfaceTool, xf: Transform3D, x: float, z: float,
+		w: float, d: float, h: float, tint: Color) -> void:
+	roof.set_color(tint * 0.8)
+	_box(roof, xf, x - 0.35, z - 0.35, w + 0.7, d + 0.7, h - 1.0, 1.0)
+
 ## One building from one mass. Real massing, not extruded boxes:
 ##   - tall masses in tower districts become PODIUM + GLASS TOWER (the
 ##     shaft goes to its own curtain-wall surface),
@@ -209,7 +246,17 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 			_box(tw, xf, ax + inx * 2.0 + sw, az + inz, sw, d - inz * 2.0, ph,
 					(h - ph) * rng.randf_range(0.75, 1.0))
 		else:
-			_box(tw, xf, ax + inx, az + inz, w - inx * 2.0, d - inz * 2.0, ph, h - ph)
+			# The shaft sits ASYMMETRICALLY on the podium — centered shafts
+			# were another every-tower-alike tell.
+			var tw_w := w - inx * 2.0
+			var tw_d := d - inz * 2.0
+			var sx := ax + rng.randf_range(0.6, maxf(0.7, w - tw_w - 0.6))
+			var sz := az + rng.randf_range(0.6, maxf(0.7, d - tw_d - 0.6))
+			_box(tw, xf, sx, sz, tw_w, tw_d, ph, h - ph)
+			ax = sx  # spire cap follows the shaft
+			az = sz
+			w = tw_w
+			d = tw_d
 			if rng.randf() < 0.35:
 				# Spire cap: a slender crown on the shaft.
 				var cw := (w - inx * 2.0) * rng.randf_range(0.2, 0.35)
@@ -220,21 +267,45 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 		roof.set_color(Color(0.30, 0.30, 0.31))
 		_box(roof, xf, ax + w * 0.5 - mw * 0.5, az + d * 0.5 - md * 0.5,
 				mw, md, h, rng.randf_range(2.5, 5.0))
+	elif h > 150.0 and w > 26.0 and d > 26.0 and rng.randf() < 0.4:
+		# CROSS-PLAN supertall: two crossing bars and a central crown —
+		# the Empire State profile, unmistakable on a skyline.
+		st.set_color(tint)
+		var bh := h * rng.randf_range(0.6, 0.72)
+		_box(st, xf, ax, az + d * 0.3, w, d * 0.4, 0.0, bh)
+		_box(st, xf, ax + w * 0.3, az, w * 0.4, d, 0.0, bh)
+		var m3 := [ax + w * 0.32, az + d * 0.32, w * 0.36, d * 0.36, h]
+		_emit_mass(st, m3, tint * 1.02, xf)
+		_roofscape(roof, rng, m3, xf)
+		_cornice(roof, xf, ax, az + d * 0.3, w, d * 0.4, bh, tint)
 	elif h > 110.0:
 		# Ziggurat: three masonry tiers — the deco wedding-cake profile.
+		# 40% get chamfered corners: an octagonal crown against the sky.
 		var t1 := h * rng.randf_range(0.4, 0.5)
 		var t2 := h * rng.randf_range(0.68, 0.8)
 		var i1 := rng.randf_range(2.0, minf(5.0, w * 0.14))
-		_emit_mass(st, [ax, az, w, d, t1], tint, xf)
+		var cham := rng.randf() < 0.4
+		var cc := rng.randf_range(2.0, minf(4.5, w * 0.12))
+		st.set_color(tint)
+		if cham:
+			_prism(st, xf, _chamfer_pts(ax, az, w, d, cc), 0.0, t1)
+		else:
+			_emit_mass(st, [ax, az, w, d, t1], tint, xf)
 		_roofscape(roof, rng, [ax, az, w, d, t1], xf)
 		if w - i1 * 2.0 > 6.0:
-			_emit_mass(st, [ax + i1, az + i1 * 0.5, w - i1 * 2.0, d - i1, t2],
-					tint * rng.randf_range(0.97, 1.03), xf)
+			st.set_color(tint * rng.randf_range(0.97, 1.03))
+			if cham:
+				_prism(st, xf, _chamfer_pts(ax + i1, az + i1 * 0.5,
+						w - i1 * 2.0, d - i1, cc), 0.0, t2)
+			else:
+				_emit_mass(st, [ax + i1, az + i1 * 0.5, w - i1 * 2.0, d - i1, t2],
+						tint * rng.randf_range(0.97, 1.03), xf)
 			var i2 := i1 * 2.0
 			if w - i2 * 2.0 > 5.0:
 				var m3 := [ax + i2, az + i2 * 0.5, w - i2 * 2.0, d - i2, h]
 				_emit_mass(st, m3, tint * rng.randf_range(0.97, 1.03), xf)
 				_roofscape(roof, rng, m3, xf)
+		_cornice(roof, xf, ax, az, w, d, t1, tint)
 	elif h > 55.0:
 		# Setback tiers: 55-70% / rest, each stepping in on every side.
 		var h1 := h * rng.randf_range(0.55, 0.7)
@@ -253,14 +324,62 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 		var m1 := [ax, az + d - fd, w, fd, h]
 		_emit_mass(st, m1, tint, xf)
 		_roofscape(roof, rng, m1, xf)
+		_cornice(roof, xf, ax, az + d - fd, w, fd, h, tint)
 		var bw := w * rng.randf_range(0.4, 0.7)
 		var m2 := [ax + rng.randf_range(0.0, w - bw), az, bw, d * 0.35,
 				h * rng.randf_range(0.7, 1.0)]
 		_emit_mass(st, m2, tint * rng.randf_range(0.94, 1.02), xf)
 		_roofscape(roof, rng, m2, xf)
+	elif h < 55.0 and w > 20.0 and d > 26.0 and rng.randf() < 0.3:
+		# L-PLAN: street bar plus a perpendicular wing — the notch reads at
+		# every band and breaks the rectangle monotony on corners.
+		var fd := d * rng.randf_range(0.5, 0.6)
+		var m1 := [ax, az, w, fd, h]
+		_emit_mass(st, m1, tint, xf)
+		_roofscape(roof, rng, m1, xf)
+		var ww := w * rng.randf_range(0.35, 0.5)
+		var wing := [ax if rng.randf() < 0.5 else ax + w - ww, az + fd,
+				ww, d - fd, h * rng.randf_range(0.8, 1.05)]
+		_emit_mass(wing_st(st), wing, tint * rng.randf_range(0.96, 1.02), xf)
+		_roofscape(roof, rng, wing, xf)
 	else:
 		_emit_mass(st, m, tint, xf)
 		_roofscape(roof, rng, m, xf)
+		if h > 12.0 and h < 90.0 and rng.randf() < 0.45:
+			_cornice(roof, xf, ax, az, w, d, h, tint)
+
+## The wing joins the same surface; helper exists so the call site reads.
+static func wing_st(st: SurfaceTool) -> SurfaceTool:
+	return st
+
+const AWNING_COLORS := [Color(0.35, 0.12, 0.10), Color(0.10, 0.22, 0.14),
+		Color(0.12, 0.16, 0.28), Color(0.35, 0.28, 0.16), Color(0.28, 0.28, 0.28)]
+
+## Storefront awnings along a mass's street face: shallow sloped boxes at
+## transom height in seeded shop-front colors. Near rings only — this is
+## street-level texture, invisible past the mid band.
+static func _awnings(roof: SurfaceTool, rng: RandomNumberGenerator, m: Array,
+		bd: float, xf: Transform3D) -> void:
+	var ax: float = m[0]
+	var az: float = m[1]
+	var w: float = m[2]
+	var d: float = m[3]
+	# Which long face touches a street? The one nearest the block edge.
+	var front_z: float
+	if absf(az + d - bd * 0.5) < 8.0:
+		front_z = az + d + 0.02
+	elif absf(az + bd * 0.5) < 8.0:
+		front_z = az - 1.22
+	else:
+		return
+	var x := ax + rng.randf_range(0.5, 2.5)
+	while x < ax + w - 3.0:
+		var aw := rng.randf_range(2.2, 4.0)
+		if rng.randf() < 0.55:
+			roof.set_color(AWNING_COLORS[rng.randi_range(0, AWNING_COLORS.size() - 1)]
+					* rng.randf_range(0.8, 1.2))
+			_box(roof, xf, x, front_z, minf(aw, ax + w - x - 0.5), 1.2, 3.1, 0.22)
+		x += aw + rng.randf_range(0.6, 2.2)
 
 static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> MeshInstance3D:
@@ -284,35 +403,15 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		_emit_building(st if roll < 0.4 else (st_b if roll < 0.72 else st_c),
 				tw, roof, rng, m,
 				tints[rng.randi_range(0, tints.size() - 1)], xf, tower_p)
-	st.generate_normals()
-	st.generate_tangents()
-	roof.generate_normals()
+		if float(b["dist"]) < 500.0:
+			_awnings(roof, rng, m, float(b["d"]), xf)
+	# Commit only NON-EMPTY surfaces, and assign each material by the
+	# index its surface actually landed at. The old fixed-index scheme
+	# committed empty surface 0 when every mass rolled onto st_b/st_c
+	# ("UVs are required" spam) and then mis-assigned every material
+	# after it — blocks silently wore the wrong skins.
 	var mi := MeshInstance3D.new()
-	var mesh: ArrayMesh = st.commit()
-	roof.commit(mesh)   # surface 1: roof furniture, its own material
-	var extra_facades := 0
-	for sti in [st_b, st_c]:
-		var b_arr: Array = (sti as SurfaceTool).commit_to_arrays()
-		var b_verts = b_arr[Mesh.ARRAY_VERTEX]
-		if b_verts != null and not (b_verts as PackedVector3Array).is_empty():
-			sti.generate_normals()
-			sti.generate_tangents()
-			sti.commit(mesh)
-			extra_facades += 1
-	# Empty-check BEFORE generate_tangents: tangents on an empty surface
-	# throw, and the first version of this lost every towerless block to
-	# that throw (whole blocks rendered as bare sidewalk aprons).
-	var tower_arr: Array = tw.commit_to_arrays()
-	# An empty surface returns NULL at ARRAY_VERTEX, not an empty array —
-	# the direct cast threw and silently dropped every towerless block.
-	var tower_verts = tower_arr[Mesh.ARRAY_VERTEX]
-	var has_towers: bool = tower_verts != null \
-			and not (tower_verts as PackedVector3Array).is_empty()
-	if has_towers:
-		tw.generate_normals()
-		tw.generate_tangents()
-		tw.commit(mesh)  # surface 2: curtain glass
-	mi.mesh = mesh
+	var mesh := ArrayMesh.new()
 	var mat := ShaderMaterial.new()
 	mat.shader = FACADE_SHADER
 	if _wall_tex.has("albedo"):
@@ -330,20 +429,30 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	mat.set_shader_parameter("window_frac_x", p["win_fx"])
 	mat.set_shader_parameter("window_frac_y", 0.5)
 	mat.set_shader_parameter("wall_roughness", 0.85)
-	# Dusk life: how much of this block is home (or still at a desk) comes
-	# from the district; whether a GIVEN window is lit is the shader's hash.
 	mat.set_shader_parameter("lit_fraction", float(p["lit"]) * night)
 	mat.set_shader_parameter("shop_lit_fraction", float(p["shop_lit"]) * night)
 	mat.set_shader_parameter("win_seed", rng.randf() * 100.0)
-	mi.set_surface_override_material(0, mat)
-	if mesh.get_surface_count() > 1:
-		mi.set_surface_override_material(1, _roof_material())
-	var next_idx := 2
-	for k in range(extra_facades):
-		mi.set_surface_override_material(next_idx, _facade_material(rng, p))
-		next_idx += 1
-	if has_towers:
-		mi.set_surface_override_material(next_idx, _tower_material(rng))
+	var mats: Array = []
+	for entry in [[st, mat, true], [roof, _roof_material(), false],
+			[st_b, null, true], [st_c, null, true], [tw, null, true]]:
+		var stool: SurfaceTool = entry[0]
+		var arr: Array = stool.commit_to_arrays()
+		var verts = arr[Mesh.ARRAY_VERTEX]
+		if verts == null or (verts as PackedVector3Array).is_empty():
+			continue
+		stool.generate_normals()
+		if entry[2]:
+			stool.generate_tangents()
+		stool.commit(mesh)
+		if entry[1] != null:
+			mats.append(entry[1])
+		elif stool == tw:
+			mats.append(_tower_material(rng))
+		else:
+			mats.append(_facade_material(rng, p))
+	mi.mesh = mesh
+	for i in range(mats.size()):
+		mi.set_surface_override_material(i, mats[i])
 	return mi
 
 ## An independent facade material: its own wall set (when the library has
