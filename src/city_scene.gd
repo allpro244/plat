@@ -287,16 +287,31 @@ func _build_plan_features(plan: CityPlan) -> void:
 		_slab_rot(pk["center"], Vector2(float(pk["w"]) + 6.0, float(pk["d"]) + 6.0),
 				float(pk["angle"]), 0.10, grass)
 	if not plan.water.is_empty():
-		var water := StandardMaterial3D.new()
-		water.albedo_color = Color(0.08, 0.12, 0.15)
-		water.roughness = 0.03
-		water.metallic = 0.4
+		var water := ShaderMaterial.new()
+		water.shader = preload("res://src/city/water.gdshader")
 		# One huge slab whose near edge lies on the shoreline: dot(p,n)=d.
 		# Sized so its far corners sit beyond the fog horizon from any band.
 		var n: Vector2 = plan.water["n"]
 		var d: float = plan.water["d"]
-		_slab_rot(n * (d + 9000.0), Vector2(18000.0, 24000.0),
-				atan2(n.y, n.x), 0.04, water)
+		var shore_ang := atan2(n.y, n.x)
+		_slab_rot(n * (d + 9000.0), Vector2(18000.0, 24000.0), shore_ang, 0.04, water)
+		# The city meets its water on built edge, not raw asphalt: an
+		# esplanade walk at curb height with a seawall lip over the drop.
+		# Segmented and clipped to the lobed city limit, like the medians.
+		var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
+		var wall := StandardMaterial3D.new()
+		wall.albedo_color = Color(0.42, 0.40, 0.37)   # weathered harbor concrete
+		wall.roughness = 0.9
+		var tangent := Vector2(-n.y, n.x)
+		var t := -CityPlan.CITY_R * 1.2
+		while t < CityPlan.CITY_R * 1.2:
+			var c: Vector2 = n * (d - 12.0) + tangent * (t + 30.0)
+			if c.length() < plan.city_limit(atan2(c.y, c.x)) * 1.04:
+				_slab_rot(n * (d - 12.0) + tangent * (t + 30.0), Vector2(22.0, 60.5),
+						shore_ang, 0.15, walk)
+				_slab_rot(n * (d - 1.6) + tangent * (t + 30.0), Vector2(1.4, 60.5),
+						shore_ang, 1.05, wall)
+			t += 60.0
 
 ## A slab centered at `center` with plan-frame X size size.x / Z size size.y,
 ## turned by `angle` (the plan's rotation convention: local +X maps to world
