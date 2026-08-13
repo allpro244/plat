@@ -206,18 +206,25 @@ static func _roof_material() -> StandardMaterial3D:
 
 static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> void:
-	var tints: Array = plan.params_for(b)["tints"]
+	var p := plan.params_for(b)
+	var tints: Array = p["tints"]
+	# Lit fraction rides COLOR.a: the merged far instance spans districts,
+	# and each block still glows (or does not) by its own district's rules.
+	var lit: float = float(p["lit"]) * night * 0.9
 	for m in _masses(rng, b, plan):
-		_emit_mass(st, m, (tints[rng.randi_range(0, tints.size() - 1)] as Color) * 0.9, xf)
+		var t: Color = (tints[rng.randi_range(0, tints.size() - 1)] as Color) * 0.9
+		t.a = lit
+		_emit_mass(st, m, t, xf)
 
-static var _far_mat: StandardMaterial3D
+static var _far_mat: ShaderMaterial
+
+const FAR_SHADER := preload("res://src/city/far.gdshader")
 
 static func _flush_far(st: SurfaceTool) -> MeshInstance3D:
 	if _far_mat == null:
-		_far_mat = StandardMaterial3D.new()
-		_far_mat.vertex_color_use_as_albedo = true
-		_far_mat.albedo_color = Color(0.5, 0.48, 0.46)  # masonry-mean base
-		_far_mat.roughness = 0.9
+		_far_mat = ShaderMaterial.new()
+		_far_mat.shader = FAR_SHADER
+		_far_mat.set_shader_parameter("base_mul", Vector3(0.5, 0.48, 0.46))
 	st.generate_normals()
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
