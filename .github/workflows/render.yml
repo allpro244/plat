@@ -1,0 +1,24 @@
+name: render
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  shoot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup (Godot + lavapipe + Xvfb)
+        run: sudo bash tools/setup-linux.sh
+      - name: Fetch pinned CC0 assets
+        run: bash tools/fetch-assets.sh
+      - name: Headless render
+        run: bash tools/shoot.sh --out=renders/ci.png
+      - name: Determinism gate
+        run: bash tools/shoot.sh --check
+      - name: Attach renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: renders
+          path: renders/*.png

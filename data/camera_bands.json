@@ -1,0 +1,21 @@
+{
+  "comment": "The camera contract, as data. Orbital rig only. Heights and radii in meters from block center at ground level. Pitch is derived from height/radius (the rig always looks at its target), so constraining those two constrains everything. The closest band still looks DOWN — see CLAUDE.md.",
+  "target_height_m": 20.0,
+  "bands": [
+    {
+      "name": "near",
+      "height_m": [70, 160],
+      "radius_m": [130, 300]
+    },
+    {
+      "name": "mid",
+      "height_m": [160, 450],
+      "radius_m": [300, 900]
+    },
+    {
+      "name": "far",
+      "height_m": [450, 1200],
+      "radius_m": [900, 2600]
+    }
+  ]
+}
