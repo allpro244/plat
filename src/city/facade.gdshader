@@ -77,6 +77,16 @@ void fragment() {
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
 		ALBEDO = wall_col * wall_tint.rgb * vtint;
+		if (windows_enabled > 0.5 && y < ground_floor_height) {
+			// Shopfront band: the street wall of a real mixed-use block is
+			// not brick to the pavement — it is painted storefront surround
+			// with a signage strip over the glass. Darken and flatten the
+			// masonry, and drop a near-black band above the opening.
+			ALBEDO = mix(ALBEDO, vec3(dot(ALBEDO, vec3(0.333))), 0.5) * 0.55;
+			if (fy > 0.78 && fy < 0.95) {
+				ALBEDO *= 0.35;   // fascia / sign band
+			}
+		}
 		ROUGHNESS = mix(wall_roughness, texture(wall_roughness_tex, wuv).r, use_roughness_texture);
 		METALLIC = wall_metallic;
 		if (use_wall_texture > 0.5) {

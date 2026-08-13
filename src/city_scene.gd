@@ -59,7 +59,7 @@ func _ready() -> void:
 		add_child(ContextGen.build(int(params["seed"]), _matlib, plan))
 		_build_plan_features(plan)
 		if not params.get("skip_ground", false):
-			add_child(GroundGen.build(plan,
+			add_child(GroundGen.build(int(params["seed"]), plan,
 					_ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0),
 					_paint_material(), _grass_material()))
 	rig = CameraRig.new()

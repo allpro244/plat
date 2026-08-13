@@ -20,12 +20,19 @@ const CURB_H := 0.15
 const WALK_W := 5.0     # sidewalk width, m — a real city cross-street walk
 const CROSSWALK_R := 900.0   # paint crosswalks within this radius only
 
-static func build(plan: CityPlan, walk_mat: Material, paint_mat: Material,
-		grass_mat: Material) -> Node3D:
+const TREE_R := 900.0        # plant street trees within this radius
+## Streets are planted where real zoning plants them: residential fabric
+## densely, the core sparsely (shafts and vaults under the walk), industry
+## not at all. Probability per district that a block's street edge has trees.
+const TREE_P := {"prewar": 0.75, "walkup": 0.9, "core": 0.3, "industrial": 0.0}
+
+static func build(seed_value: int, plan: CityPlan, walk_mat: Material,
+		paint_mat: Material, grass_mat: Material) -> Node3D:
 	var root := Node3D.new()
 	var walks := _st()
 	var paint := _st()
 	var green := _st()
+	var trees := _st()
 	for b in plan.blocks:
 		var c := Vector2(float(b["x"]), float(b["z"]))
 		var ang: float = b["angle"]
@@ -35,13 +42,85 @@ static func build(plan: CityPlan, walk_mat: Material, paint_mat: Material,
 		if float(b["dist"]) < CROSSWALK_R:
 			_crosswalks(paint, c, Vector2(hw, hd), ang)
 			_lane_line(paint, c, Vector2(hw, hd), ang, float(b["road"]))
+		if float(b["dist"]) < TREE_R:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = hash("%d/trees/%s" % [seed_value, b["key"]])
+			if rng.randf() < float(TREE_P[b["district"]]):
+				_street_trees(trees, rng, c, Vector2(hw, hd), ang)
 	for bl in plan.boulevards:
 		_median(green, plan, bl)
-	for pair in [[walks, walk_mat], [paint, paint_mat], [green, grass_mat]]:
+	for pair in [[walks, walk_mat], [paint, paint_mat], [green, grass_mat],
+			[trees, _tree_material()]]:
 		var mi := _commit(pair[0] as SurfaceTool, pair[1] as Material)
 		if mi != null:
 			root.add_child(mi)
 	return root
+
+static var _tree_mat: StandardMaterial3D
+
+static func _tree_material() -> StandardMaterial3D:
+	if _tree_mat == null:
+		_tree_mat = StandardMaterial3D.new()
+		_tree_mat.vertex_color_use_as_albedo = true
+		# Vertex colors reach the shader brighter than authored (sRGB->linear
+		# path); this multiplier brings rendered foliage back to the ~0.12
+		# reflectance real canopies have. Set by comparing a render to the
+		# authored value, not by taste.
+		_tree_mat.albedo_color = Color(0.45, 0.45, 0.45)
+		_tree_mat.roughness = 1.0
+		# No specular: the sky-dome reflection was washing small dark
+		# canopies toward grey at the mid band.
+		_tree_mat.metallic_specular = 0.0
+	return _tree_mat
+
+## A row of trees down each long sidewalk edge, 1 m inside the curb. Each
+## tree is a trunk stick and an octahedron canopy — an IMPRESSION: from the
+## banded camera a street tree is a soft green lump with a shadow, and eight
+## triangles buy exactly that.
+static func _street_trees(st: SurfaceTool, rng: RandomNumberGenerator,
+		c: Vector2, half: Vector2, ang: float) -> void:
+	var u := Vector2(cos(ang), sin(ang))
+	var v := Vector2(-sin(ang), cos(ang))
+	for side in [-1.0, 1.0]:
+		var edge: Vector2 = c + v * (half.y - 1.0) * side
+		var t := -half.x + 4.0
+		while t < half.x - 4.0:
+			if rng.randf() < 0.8:   # gaps: dead pits, hydrants, curb cuts
+				var p: Vector2 = edge + u * t
+				# Foliage albedo is LOW — leaves absorb: ~0.10-0.15 green.
+				var green := Color(0.075, 0.115, 0.045) * rng.randf_range(0.8, 1.3)
+				_tree(st, Vector3(p.x, CURB_H, p.y), rng.randf_range(2.6, 4.2),
+						rng.randf_range(5.5, 8.5), green)
+			t += rng.randf_range(7.5, 11.0)
+
+static func _tree(st: SurfaceTool, base: Vector3, r: float, h: float, col: Color) -> void:
+	st.set_color(Color(0.16, 0.13, 0.10))
+	_tree_octa(st, base, 0.18, 0.18, h * 0.45, 0.0, 0.0)  # trunk: thin dark spike
+	st.set_color(col)
+	# Two interlocked octahedra, one turned 45 deg: eight lobes instead of
+	# four, so the canopy reads as a rounded mass, not a paper dart.
+	_tree_octa(st, base, r, r, h - h * 0.4, h * 0.4, 0.0)
+	_tree_octa(st, base, r * 0.8, r * 0.8, (h - h * 0.4) * 0.85, h * 0.45, PI * 0.25)
+
+## Octahedron: 4 upper + 4 lower faces around a mid "equator".
+static func _tree_octa(st: SurfaceTool, base: Vector3, rx: float, rz: float,
+		h: float, y0: float, rot: float) -> void:
+	var mid := base + Vector3(0, y0 + h * 0.45, 0)
+	var top := base + Vector3(0, y0 + h, 0)
+	var bot := base + Vector3(0, y0, 0)
+	var e := []
+	for k in range(4):
+		var a := rot + float(k) * PI * 0.5
+		e.append(mid + Vector3(cos(a) * rx, 0, sin(a) * rz))
+	for i in range(4):
+		var a: Vector3 = e[i]
+		var b: Vector3 = e[(i + 1) % 4]
+		for q in [top, a, b]:
+			st.set_uv(Vector2(q.x, q.z))
+			st.add_vertex(q)
+		for q in [bot, b, a]:
+			st.set_uv(Vector2(q.x, q.z))
+			st.add_vertex(q)
 
 # --- pieces -----------------------------------------------------------------
 
