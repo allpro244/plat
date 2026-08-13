@@ -102,22 +102,65 @@ static func _emit_mass(st: SurfaceTool, m: Array, tint: Color, xf: Transform3D) 
 
 # --- tiers ------------------------------------------------------------------
 
+## Roof furniture for one mass: a parapet lip around the edge plus a seeded
+## handful of bulkheads and mech units. The camera contract says the closest
+## band still looks DOWN, so roofs are as visible as facades — and a bare
+## flat plane is the loudest thing in an aerial frame.
+static func _roofscape(st: SurfaceTool, rng: RandomNumberGenerator, m: Array,
+		xf: Transform3D) -> void:
+	var ax: float = m[0]
+	var az: float = m[1]
+	var w: float = m[2]
+	var d: float = m[3]
+	var h: float = m[4]
+	st.set_color(Color(0.30, 0.30, 0.31))
+	# Parapet: the roof edge of a real building stands ~1 m proud, which is
+	# what casts the thin shadow line that reads as "roof" from above.
+	var lip := 0.55
+	var ph := rng.randf_range(0.7, 1.15)
+	_box(st, xf, ax, az, w, lip, h, ph)
+	_box(st, xf, ax, az + d - lip, w, lip, h, ph)
+	_box(st, xf, ax, az + lip, lip, d - lip * 2.0, h, ph)
+	_box(st, xf, ax + w - lip, az + lip, lip, d - lip * 2.0, h, ph)
+	# Bulkhead (stair/lift overrun) and mech units. Count rises with roof
+	# area: a 12 m infill roof gets one box, a full block gets several.
+	var n := clampi(int(w * d / 260.0), 1, 5)
+	for k in range(n):
+		var bw := rng.randf_range(2.5, minf(7.0, w * 0.45))
+		var bd := rng.randf_range(2.5, minf(6.0, d * 0.45))
+		var bh := rng.randf_range(1.2, 3.6) if k > 0 else rng.randf_range(2.8, 4.6)
+		_box(st, xf, ax + rng.randf_range(1.5, maxf(1.6, w - bw - 1.5)),
+				az + rng.randf_range(1.5, maxf(1.6, d - bd - 1.5)), bw, bd, h, bh)
+
+static func _box(st: SurfaceTool, xf: Transform3D, x: float, z: float,
+		w: float, d: float, y: float, h: float) -> void:
+	_wall(st, xf, Vector3(x + w, y, z), Vector3(x, y, z), h)
+	_wall(st, xf, Vector3(x, y, z + d), Vector3(x + w, y, z + d), h)
+	_wall(st, xf, Vector3(x + w, y, z + d), Vector3(x + w, y, z), h)
+	_wall(st, xf, Vector3(x, y, z), Vector3(x, y, z + d), h)
+	_top(st, xf, x, z, w, d, y + h)
+
 static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> MeshInstance3D:
 	var st := _st()
 	var p := plan.params_for(b)
 	var tints: Array = p["tints"]
 	var near_hero: bool = float(b["dist"]) < 300.0
+	var roof := _st()
 	for m in _masses(rng, b, plan):
 		# Blocks just south of the hero sit between it and the sun-derived
 		# camera: keep them low so background never blocks subject.
 		if near_hero and float(b["z"]) > 31.0 and m[4] > 30.0:
 			m[4] = rng.randf_range(18.0, 30.0)
 		_emit_mass(st, m, tints[rng.randi_range(0, tints.size() - 1)], xf)
+		_roofscape(roof, rng, m, xf)
 	st.generate_normals()
 	st.generate_tangents()
+	roof.generate_normals()
 	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
+	var mesh: ArrayMesh = st.commit()
+	roof.commit(mesh)   # surface 1: roof furniture, its own material
+	mi.mesh = mesh
 	var mat := ShaderMaterial.new()
 	mat.shader = FACADE_SHADER
 	if _wall_tex.has("albedo"):
@@ -135,8 +178,22 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	mat.set_shader_parameter("window_frac_x", p["win_fx"])
 	mat.set_shader_parameter("window_frac_y", 0.5)
 	mat.set_shader_parameter("wall_roughness", 0.85)
-	mi.material_override = mat
+	mi.set_surface_override_material(0, mat)
+	if mesh.get_surface_count() > 1:
+		mi.set_surface_override_material(1, _roof_material())
 	return mi
+
+static var _roof_mat: StandardMaterial3D
+
+## Built-up roofing and painted metal plant: near-black, matte. Vertex color
+## carries the slight per-piece variation.
+static func _roof_material() -> StandardMaterial3D:
+	if _roof_mat == null:
+		_roof_mat = StandardMaterial3D.new()
+		_roof_mat.vertex_color_use_as_albedo = true
+		_roof_mat.albedo_color = Color(0.34, 0.335, 0.33)
+		_roof_mat.roughness = 0.95
+	return _roof_mat
 
 static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> void:

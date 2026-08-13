@@ -58,6 +58,10 @@ func _ready() -> void:
 		print("[plat] ", plan.describe())
 		add_child(ContextGen.build(int(params["seed"]), _matlib, plan))
 		_build_plan_features(plan)
+		if not params.get("skip_ground", false):
+			add_child(GroundGen.build(plan,
+					_ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0),
+					_paint_material(), _grass_material()))
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.set_band(params["band"])
@@ -259,10 +263,22 @@ func _build_ground() -> void:
 ## Parks and water from the city plan. A park is mown ground aligned to its
 ## domain's grid; water is one reflective plane covering the half-plane
 ## beyond the (angled) shoreline.
+## Road paint: aged white thermoplastic, not pure white — fresh paint is
+## ~0.75 reflectance and city paint weathers well below that.
+func _paint_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.62, 0.61, 0.58)
+	m.roughness = 0.75
+	return m
+
+func _grass_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.30, 0.37, 0.24)
+	m.roughness = 1.0
+	return m
+
 func _build_plan_features(plan: CityPlan) -> void:
-	var grass := StandardMaterial3D.new()
-	grass.albedo_color = Color(0.30, 0.37, 0.24)
-	grass.roughness = 1.0
+	var grass := _grass_material()
 	for pk in plan.parks:
 		_slab_rot(pk["center"], Vector2(float(pk["w"]) + 6.0, float(pk["d"]) + 6.0),
 				float(pk["angle"]), 0.10, grass)
@@ -359,7 +375,12 @@ func _ground_material(slot: String, fallback: Color, rough: float, coverage_m: f
 		m.albedo_texture = tex["albedo"]
 		# Scans are captured clean; street asphalt runs darker than a fresh
 		# scan in every real aerial photo. Modulate rather than repaint.
-		m.albedo_color = Color(0.62, 0.62, 0.64) if slot == "asphalt" else Color.WHITE
+		# Scans are captured clean and lit flat. Street asphalt runs darker
+		# than a fresh scan in every real aerial photo, and city sidewalk
+		# concrete sits near 0.35 albedo, not the ~0.55 of a clean scan —
+		# undimmed, the walks blew out to white at the mid band.
+		m.albedo_color = Color(0.62, 0.62, 0.64) if slot == "asphalt" \
+				else (Color(0.72, 0.71, 0.69) if slot == "sidewalk" else Color.WHITE)
 		m.normal_enabled = true
 		m.normal_texture = tex["normal"]
 		m.ao_enabled = true

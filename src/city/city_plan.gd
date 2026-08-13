@@ -183,14 +183,14 @@ func _district_of(p: Vector2) -> String:
 
 ## Where the city ends in a given direction: a lobed, seeded closed curve
 ## (mean ~0.88 CITY_R, lobes ±~20%) — a city that grew unevenly, not a circle.
-func _city_limit(bearing: float) -> float:
+func city_limit(bearing: float) -> float:
 	var f := 0.88
 	for h in _limit_h:
 		f += float(h[0]) * sin(bearing * float(h[1]) + float(h[2]))
 	return CITY_R * f
 
 func _keep(p: Vector2, dom: int, half_w: float, half_d: float) -> bool:
-	if p.length() > _city_limit(atan2(p.y, p.x)):
+	if p.length() > city_limit(atan2(p.y, p.x)):
 		return false
 	if _nearest_domain(p) != dom:
 		return false  # another domain's grid owns this ground
@@ -222,7 +222,7 @@ func _hero_positions() -> Dictionary:
 		row_z0[gy] = row_z0[gy - 1] + BLOCK_D + wz[gy]
 	for gy in range(-1, -RINGS - 1, -1):
 		row_z0[gy] = row_z0[gy + 1] - wz[gy + 1] - BLOCK_D
-	return {"col_x0": col_x0, "row_z0": row_z0}
+	return {"col_x0": col_x0, "row_z0": row_z0, "wz": wz}
 
 func _make_blocks() -> void:
 	# Domain 0: the hero grid, axis-aligned, contract widths.
@@ -233,7 +233,8 @@ func _make_blocks() -> void:
 				continue  # the hero block itself is BlockGen's
 			var c := Vector2(float(pos["col_x0"][gx]) + BLOCK_W * 0.5,
 					float(pos["row_z0"][gy]) + BLOCK_D * 0.5)
-			_try_block(c, 0, 0.0, BLOCK_W, BLOCK_D, "0/%d/%d" % [gx, gy])
+			_try_block(c, 0, 0.0, BLOCK_W, BLOCK_D, "0/%d/%d" % [gx, gy],
+					float(pos["wz"][gy + 1]))
 	# Other domains: rotated lattices anchored at the domain center.
 	for di in range(1, domains.size()):
 		var d: Dictionary = domains[di]
@@ -251,16 +252,17 @@ func _make_blocks() -> void:
 				var c: Vector2 = (d["center"] as Vector2) \
 						+ u * (float(i) * pitch_x + extra * 0.5) + v * (float(j) * pitch_z)
 				_try_block(c, di, ang, float(d["bw"]) - extra, float(d["bd"]),
-						"%d/%d/%d" % [di, i, j])
+						"%d/%d/%d" % [di, i, j], float(d["rz"]))
 
 ## Keep the block whole if its ground passes every test; otherwise SUBDIVIDE:
 ## quarter-blocks retest individually, so domain seams, boulevard edges, park
 ## edges and the city limit get fronted by smaller, irregular buildings
 ## instead of dying wholesale and leaving a bare-asphalt void. This is where
 ## the fine grain real cities have at their discontinuities comes from.
-func _try_block(c: Vector2, dom: int, ang: float, w: float, d: float, key: String) -> void:
+func _try_block(c: Vector2, dom: int, ang: float, w: float, d: float, key: String,
+		road: float = 24.0) -> void:
 	if _keep(c, dom, w * 0.5, d * 0.5):
-		blocks.append(_block(c, ang, w, d, key))
+		blocks.append(_block(c, ang, w, d, key, road))
 		return
 	if w < 70.0 or d < 34.0:
 		return
@@ -283,11 +285,15 @@ func _try_block(c: Vector2, dom: int, ang: float, w: float, d: float, key: Strin
 					if _nearest_domain(sc + u * (hw * float(cx)) + v * (hd * float(cz))) != dom:
 						ok = false
 			if ok:
-				blocks.append(_block(sc, ang, hw - 4.0, hd - 4.0, key + "/q%d" % q))
+				blocks.append(_block(sc, ang, hw - 4.0, hd - 4.0, key + "/q%d" % q, road))
 
-func _block(c: Vector2, ang: float, w: float, d: float, key: String) -> Dictionary:
+## `road` is the width of the street running along this block's long side —
+## the ground pass needs it to put a centerline down the middle of the
+## roadway rather than a guessed distance from the curb.
+func _block(c: Vector2, ang: float, w: float, d: float, key: String,
+		road: float = 24.0) -> Dictionary:
 	return {"key": key, "x": c.x, "z": c.y, "angle": ang, "w": w, "d": d,
-			"dist": c.length(), "district": _district_of(c)}
+			"road": road, "dist": c.length(), "district": _district_of(c)}
 
 # --- queries ----------------------------------------------------------------
 
