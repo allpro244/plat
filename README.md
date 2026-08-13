@@ -36,6 +36,8 @@ want headless renders on a machine without a GPU.
 
 | input | does |
 |---|---|
+| `W` `A` `S` `D` | travel across the city (hold Shift to move faster) |
+| `C` | re-centre on downtown |
 | drag / ← → | orbit |
 | wheel / ↑ ↓ | dolly in-out |
 | PgUp / PgDn | height |

@@ -7,12 +7,18 @@ extends Node3D
 ## construction (CLAUDE.md: the contract is load-bearing).
 ##
 ## Controls
+##   W A S D ......... travel across the city (pan the orbit target)
 ##   drag / arrows ... orbit          wheel / up-down ... dolly (clamped)
 ##   PgUp / PgDn ..... height          1 2 3 ............ near / mid / far band
+##   Shift ........... move faster     C ................ re-centre on downtown
 ##   T / G ........... time of day     N ................ new city (random seed)
 ##   R ............... rebuild         F ................ cycle preset views
 ##   H ............... toggle help     F12 .............. save a screenshot
 ##   Esc ............. quit
+##
+## Panning the TARGET is not free-fly: the camera still orbits that target
+## inside its height band. You travel the city the way a helicopter would,
+## not the way a noclip camera would, so every band guarantee still holds.
 ##
 ## Rebuilding a city is ~1-3 s of single-threaded generation, so the HUD
 ## says so and the frame is yielded before the work starts — otherwise the
@@ -22,6 +28,9 @@ const ORBIT_SPEED := 40.0        # deg/sec on arrows
 const DRAG_SENSITIVITY := 0.32   # deg per pixel
 const DOLLY_SPEED := 90.0        # m/sec on arrows
 const WHEEL_STEP := 0.06         # fraction of current radius per notch
+## Travel speed scales with how far out you are: at the far band a fixed
+## metres-per-second crawl would take a minute to cross the island.
+const PAN_FACTOR := 0.55         # multiples of current radius per second
 
 var city: CityScene
 var seed_value := 1928
@@ -38,6 +47,7 @@ var _fps_accum := 0.0
 var _fps_frames := 0
 var _fps := 0.0
 var _selftest := false
+var _target := Vector2.ZERO      # orbit centre, world XZ
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -76,7 +86,11 @@ func _rebuild() -> void:
 ## save a frame, quit. This is how an interactive scene gets the same
 ## "verified by render" treatment as the still pipeline.
 func _run_selftest() -> void:
-	for step in [["orbit", func() -> void: _orbit(45.0)],
+	for step in [["pan", func() -> void: _pan(1.0, 0.4, 1.0)],
+			["recentre", func() -> void:
+				_target = city._plan.core_center
+				_push()],
+			["orbit", func() -> void: _orbit(45.0)],
 			["dolly", func() -> void: _dolly(30.0)],
 			["height", func() -> void: _height(25.0)],
 			["band mid", func() -> void: _set_band("mid")],
@@ -117,7 +131,28 @@ func _set_band(b: String) -> void:
 
 func _push() -> void:
 	if city and city.rig:
+		city.rig.set_target_xz(_target.x, _target.y)
 		city.rig.set_view(az, height, radius)
+
+## Travel across the city, in the direction the camera is FACING (W is
+## always "away from me"), clamped to the island so you cannot wander off
+## into empty harbour and lose the city behind you.
+func _pan(forward: float, strafe: float, delta: float) -> void:
+	var a := deg_to_rad(az)
+	# The camera sits at azimuth `az` from the target and looks inward, so
+	# "forward" is the inward direction.
+	var fwd := Vector2(-sin(a), cos(a))
+	var right := Vector2(cos(a), sin(a))
+	var speed := radius * PAN_FACTOR * delta
+	if Input.is_key_pressed(KEY_SHIFT):
+		speed *= 3.0
+	_target += (fwd * forward + right * strafe) * speed
+	var limit := 2600.0
+	if city and city._plan != null:
+		limit = city._plan.city_limit(atan2(_target.y, _target.x)) + 400.0
+	if _target.length() > limit:
+		_target = _target.normalized() * limit
+	_push()
 
 func _process(delta: float) -> void:
 	_fps_accum += delta
@@ -140,6 +175,18 @@ func _process(delta: float) -> void:
 		_height(60.0 * delta)
 	if Input.is_key_pressed(KEY_PAGEDOWN):
 		_height(-60.0 * delta)
+	var fwd := 0.0
+	var strafe := 0.0
+	if Input.is_key_pressed(KEY_W):
+		fwd += 1.0
+	if Input.is_key_pressed(KEY_S):
+		fwd -= 1.0
+	if Input.is_key_pressed(KEY_D):
+		strafe += 1.0
+	if Input.is_key_pressed(KEY_A):
+		strafe -= 1.0
+	if fwd != 0.0 or strafe != 0.0:
+		_pan(fwd, strafe, delta)
 	_update_hud()
 
 func _update_hud() -> void:
@@ -151,10 +198,11 @@ func _update_hud() -> void:
 	var help := ""
 	if _help_visible:
 		help = ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
+				+ "\nWASD travel (Shift faster)   C re-centre downtown"
 				+ "\n1 2 3 band   T/G time   N new city   F preset view"
 				+ "\nH help   F12 screenshot   Esc quit")
-	_hud.text = "plat — %.0f fps | %s | %02d:%02d%s%s" % [
-			_fps, city.rig.describe(), int(time_of_day),
+	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s" % [
+			_fps, city.rig.describe(), _target.x, _target.y, int(time_of_day),
 			int(fposmod(time_of_day, 1.0) * 60.0), plan_line, help]
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -191,6 +239,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_rebuild()
 			KEY_R:
 				_rebuild()
+			KEY_C:
+				# Back to downtown — easy to get lost on a 5 km island.
+				_target = Vector2.ZERO
+				if city and city._plan != null:
+					_target = city._plan.core_center
+				_push()
 			KEY_F:
 				_cycle_preset()
 			KEY_H:
