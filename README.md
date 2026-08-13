@@ -20,7 +20,44 @@ and assigns eras, `Grammar` turns each lot into massing + facade parameters by
 era rule, `MeshBuilder` turns those into meshes. Windows are dimensional
 arithmetic in a shader (floors × bays at stated sizes), not a texture.
 
-## Running
+## Playing it
+
+On a machine with a GPU:
+
+```sh
+git clone <this repo> && cd plat
+bash tools/fetch-assets.sh     # pinned CC0 materials + sky (never committed)
+godot --path .                 # or: open the folder in the Godot 4.5 editor, press F5
+```
+
+Godot 4.5 is the only dependency ([download](https://godotengine.org/download));
+`tools/setup-linux.sh` installs it plus the software-Vulkan stack if you also
+want headless renders on a machine without a GPU.
+
+| input | does |
+|---|---|
+| drag / ← → | orbit |
+| wheel / ↑ ↓ | dolly in-out |
+| PgUp / PgDn | height |
+| `1` `2` `3` | near / mid / far camera band |
+| `T` / `G` | time of day (rebuilds; sun and lit windows follow) |
+| `N` | **new city** — fresh random seed, whole island regenerates |
+| `F` | cycle the three preset framings |
+| `R` rebuild, `H` help, `F12` screenshot, `Esc` quit |
+
+The HUD shows live camera state and the city's plan line — seed, palette
+family, height mode, era bias, island/islet count, district mix — so a city
+you like can be reproduced exactly from its seed. Generating a city is
+1–3 seconds of single-threaded work; the HUD says so while it runs.
+
+The camera is deliberately **orbital and band-clamped**, in play exactly as in
+the headless shots: no free-fly. That contract is what makes interiors,
+facade LOD, and baked ground relationships tractable (see `CLAUDE.md`).
+
+There is no economy yet — this is the city generator and renderer. Buildings
+are scenery, not yet assets with rents.
+
+## Rendering headless
 
 ```sh
 tools/setup-linux.sh     # Godot 4.5 + lavapipe + Xvfb (one-time; no GPU needed)
@@ -28,7 +65,7 @@ tools/fetch-assets.sh    # pinned CC0 assets (Poly Haven / mirrors), gitignored
 tools/shoot.sh           # headless render -> renders/shot.png
 tools/shoot.sh --check   # renders twice, fails unless byte-identical
 tools/shoot.sh --seed=7 --time=7.25 --band=mid --az=140  # any parameter varies
-godot --path .           # interactive orbit (same rig, same clamps)
+godot --path . -- --selftest   # drives the playable scene, saves a frame, quits
 ```
 
 Every shot prints its full parameter line (seed, date, time, computed sun

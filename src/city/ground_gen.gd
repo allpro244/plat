@@ -239,7 +239,11 @@ static func _slab(st: SurfaceTool, c: Vector2, half: Vector2, ang: float, h: flo
 
 static func _commit(st: SurfaceTool, mat: Material) -> MeshInstance3D:
 	var arr := st.commit_to_arrays()
-	if (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
+	# An empty SurfaceTool yields NULL at ARRAY_VERTEX, not an empty array,
+	# and the direct cast throws (seen as script-error spam whenever a city
+	# had no boulevards, so the median surface stayed empty).
+	var verts = arr[Mesh.ARRAY_VERTEX]
+	if not (verts is PackedVector3Array) or (verts as PackedVector3Array).is_empty():
 		return null
 	st.generate_normals()
 	st.generate_tangents()

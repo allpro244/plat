@@ -178,7 +178,8 @@ static func _st() -> SurfaceTool:
 static func _commit(mesh: ArrayMesh, st: SurfaceTool, mat: Material) -> void:
 	# An untouched SurfaceTool has no vertices; generate_tangents errors on it.
 	var arrays := st.commit_to_arrays()
-	if arrays[Mesh.ARRAY_VERTEX] == null or (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
+	var verts = arrays[Mesh.ARRAY_VERTEX]
+	if not (verts is PackedVector3Array) or (verts as PackedVector3Array).is_empty():
 		return
 	st.generate_normals()
 	st.generate_tangents()

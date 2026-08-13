@@ -509,7 +509,7 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		var stool: SurfaceTool = entry[0]
 		var arr: Array = stool.commit_to_arrays()
 		var verts = arr[Mesh.ARRAY_VERTEX]
-		if verts == null or (verts as PackedVector3Array).is_empty():
+		if not (verts is PackedVector3Array) or (verts as PackedVector3Array).is_empty():
 			continue
 		stool.generate_normals()
 		if entry[2]:
