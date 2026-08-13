@@ -13,6 +13,13 @@ class_name MeshBuilder
 
 const FACADE_SHADER := preload("res://src/city/facade.gdshader")
 
+## Diagnostic: force plain StandardMaterial3D everywhere (no custom shader).
+static var plain_materials := false
+## Diagnostic: replace windowed facades with plain walls.
+static var skip_windows := false
+## Diagnostic: skip roof props (cornice/parapet/bulkhead/water tower).
+static var skip_props := false
+
 static var _roof_mat: StandardMaterial3D
 static var _wood_mat: StandardMaterial3D
 static var _steel_mat: StandardMaterial3D
@@ -31,7 +38,7 @@ static func building_node(b: Dictionary, wall_textures: Dictionary) -> Node3D:
 
 	for box in b["boxes"]:
 		_emit_box(b, box, st_wall, st_glass, st_curtain, st_roof)
-	for prop in b["props"]:
+	for prop in (([] if skip_props else b["props"]) as Array):
 		match prop["type"]:
 			"cornice":
 				_emit_cornice(st_wall, prop)
@@ -57,7 +64,12 @@ static func building_node(b: Dictionary, wall_textures: Dictionary) -> Node3D:
 
 # --- materials -------------------------------------------------------------
 
-static func _wall_material(f: Dictionary, tex: Dictionary) -> ShaderMaterial:
+static func _wall_material(f: Dictionary, tex: Dictionary) -> Material:
+	if plain_materials:
+		var pm := StandardMaterial3D.new()
+		pm.albedo_color = f["tint"]
+		pm.roughness = 0.87
+		return pm
 	var m := ShaderMaterial.new()
 	m.shader = FACADE_SHADER
 	if tex.has("albedo"):
@@ -88,7 +100,13 @@ static func _glass_material() -> StandardMaterial3D:
 		_glass_mat.metallic = 0.85
 	return _glass_mat
 
-static func _curtain_material(f: Dictionary) -> ShaderMaterial:
+static func _curtain_material(f: Dictionary) -> Material:
+	if plain_materials:
+		var pm := StandardMaterial3D.new()
+		pm.albedo_color = Color(0.2, 0.22, 0.24)
+		pm.roughness = 0.3
+		pm.metallic = 0.5
+		return pm
 	var m := ShaderMaterial.new()
 	m.shader = FACADE_SHADER
 	m.set_shader_parameter("use_wall_texture", 0.0)
@@ -182,6 +200,8 @@ static func _emit_box(b: Dictionary, box: Dictionary, st_wall: SurfaceTool,
 			_side(st_wall, side[0], side[1], s.y)
 		elif curtain:
 			_side(st_curtain, side[0], side[1], s.y)
+		elif skip_windows:
+			_side(st_wall, side[0], side[1], s.y)
 		else:
 			_side_windowed(st_wall, st_glass, side[0], side[1], s.y, f)
 	_emit_top(st_roof, aabb)

@@ -64,6 +64,20 @@ func _parse_args() -> Dictionary:
 				p["out"] = val
 			"gi":
 				p["gi"] = val == "on"
+			"context":
+				p["no_context"] = val == "off"
+			"env":
+				p["env_plain"] = val == "plain"
+			"block":
+				p["no_block"] = val == "off"
+			"mats":
+				p["plain_mats"] = val == "plain"
+			"only":
+				p["only_lot"] = val
+			"windows":
+				p["skip_windows"] = val == "off"
+			"props":
+				p["skip_props"] = val == "off"
 			_:
 				printerr("[plat] unknown arg --", key)
 	return p

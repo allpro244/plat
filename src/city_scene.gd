@@ -29,7 +29,11 @@ static func defaults() -> Dictionary:
 		# sky_delta warning then reports any disagreement.
 		"latitude": 40.7128, "longitude": -74.0060, "utc_offset": -4.0,
 		"year": 2026, "month": 6, "day": 21, "time": null,
-		"band": "near", "cam_azimuth": 222.0, "cam_height": 135.0, "cam_radius": 190.0,
+		# Camera azimuth sits ~115 deg off the evening sun so shadows rake
+		# ACROSS the frame. A down-sun view hides every shadow behind its
+		# caster — learned by chasing "broken" shadows that were merely
+		# pointed away from the lens.
+		"band": "near", "cam_azimuth": 155.0, "cam_height": 120.0, "cam_radius": 195.0,
 		"gi": false,
 	}
 
@@ -41,8 +45,13 @@ func _ready() -> void:
 	_build_environment()
 	_build_sun()
 	_build_ground()
-	_build_block()
-	add_child(ContextGen.build(int(params["seed"])))
+	MeshBuilder.plain_materials = params.get("plain_mats", false)
+	MeshBuilder.skip_windows = params.get("skip_windows", false)
+	MeshBuilder.skip_props = params.get("skip_props", false)
+	if not params.get("no_block", false):
+		_build_block()
+	if not params.get("no_context", false):
+		add_child(ContextGen.build(int(params["seed"])))
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.set_band(params["band"])
@@ -50,6 +59,23 @@ func _ready() -> void:
 
 func _build_environment() -> void:
 	var env := Environment.new()
+	if params.get("env_plain", false):
+		# Diagnostic: probe-level environment (no sky, no fog, no SSAO, default
+		# tonemap) to isolate which env feature eats the sun.
+		var sunp := SunPosition.compute(params["year"], params["month"], params["day"],
+				15.98 if params["time"] == null else params["time"],
+				params["latitude"], params["longitude"], params["utc_offset"])
+		params["time"] = 15.98 if params["time"] == null else params["time"]
+		sun_info = sunp
+		env.background_mode = Environment.BG_COLOR
+		env.background_color = Color(0.6, 0.75, 0.9)
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = Color(0.6, 0.65, 0.7)
+		env.ambient_light_energy = 0.55
+		var wep := WorldEnvironment.new()
+		wep.environment = env
+		add_child(wep)
+		return
 	var hdri_path := ASSET_DIR + "/sky/sky.hdr"
 	var baked := {}
 	var img: Image = null
@@ -228,6 +254,13 @@ func _build_block() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(params["seed"])
 	var lots := BlockGen.generate(rng)
+	var only: String = str(params.get("only_lot", ""))
+	if only != "":
+		var filtered := []
+		for l in lots:
+			if l["id"] == only:
+				filtered.append(l)
+		lots = filtered
 	var textures := _load_wall_textures()
 	var counts := {}
 	for lot in lots:
