@@ -19,7 +19,11 @@ class_name ContextGen
 
 const FACADE_SHADER := preload("res://src/city/facade.gdshader")
 
-const NEAR_R := 850.0   # windowed-tier radius, meters (~old rings 1-4)
+const NEAR_R := 3200.0  # windowed-tier radius: the WHOLE island renders full-quality.
+## The 850 m tiering was a frame-cost decision from the orbital-hero era;
+## with island-wide beauty cameras the impostor tier filled most of every
+## frame and read as white boxes (user-reported). Stills can afford full
+## quality everywhere; the far tier code remains for a future LOD dial.
 
 static var _wall_tex := {}
 
