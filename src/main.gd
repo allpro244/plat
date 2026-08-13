@@ -7,30 +7,32 @@ extends Node3D
 ## construction (CLAUDE.md: the contract is load-bearing).
 ##
 ## Controls
-##   W A S D ......... travel across the city (pan the orbit target)
-##   drag / arrows ... orbit          wheel / up-down ... dolly (clamped)
-##   PgUp / PgDn ..... height          1 2 3 ............ near / mid / far band
-##   Shift ........... move faster     C ................ re-centre on downtown
-##   T / G ........... time of day     N ................ new city (random seed)
-##   R ............... rebuild         F ................ cycle preset views
-##   H ............... toggle help     F12 .............. save a screenshot
-##   Esc ............. quit
+## Movement is the Broadway-and-Wall map scheme (it was a MapLibre map):
+##   left-drag ....... grab the ground and PAN — the city slides with you
+##   right-drag ...... rotate (x) and tilt via height (y)
+##   wheel ........... zoom toward the city (clamped to the band)
+##   arrows .......... pan, like a map's keyboard controls
+##   1 2 3 ........... near / mid / far band     C ....... re-centre downtown
+##   T / G ........... time of day               N ....... new city
+##   R rebuild   F preset views   H help   F12 screenshot   Esc quit
+## Every move eases in (exponential approach), so it glides like easeTo
+## instead of snapping — that glide was most of the old map's feel.
 ##
 ## Panning the TARGET is not free-fly: the camera still orbits that target
-## inside its height band. You travel the city the way a helicopter would,
-## not the way a noclip camera would, so every band guarantee still holds.
+## inside its height band — a helicopter, not a noclip camera. Every band
+## guarantee holds.
 ##
 ## Rebuilding a city is ~1-3 s of single-threaded generation, so the HUD
 ## says so and the frame is yielded before the work starts — otherwise the
 ## window looks hung.
 
-const ORBIT_SPEED := 40.0        # deg/sec on arrows
-const DRAG_SENSITIVITY := 0.32   # deg per pixel
-const DOLLY_SPEED := 90.0        # m/sec on arrows
-const WHEEL_STEP := 0.06         # fraction of current radius per notch
-## Travel speed scales with how far out you are: at the far band a fixed
-## metres-per-second crawl would take a minute to cross the island.
-const PAN_FACTOR := 0.55         # multiples of current radius per second
+const ROTATE_SENSITIVITY := 0.32   # deg per pixel, right-drag x
+const TILT_SENSITIVITY := 0.9      # metres of height per pixel, right-drag y
+const WHEEL_STEP := 0.1            # fraction of current radius per notch
+const KEY_PAN := 0.5               # multiples of radius per second, arrows
+## Exponential approach rate for the easeTo glide. ~8/s reaches 92% of a
+## move in 300 ms — the pace of the old map's default ease.
+const EASE := 8.0
 
 var city: CityScene
 var seed_value := 1928
@@ -42,12 +44,18 @@ var time_of_day := 15.5
 var _hud: Label
 var _help_visible := true
 var _busy := false
-var _dragging := false
+var _panning := false
+var _rotating := false
 var _fps_accum := 0.0
 var _fps_frames := 0
 var _fps := 0.0
 var _selftest := false
-var _target := Vector2.ZERO      # orbit centre, world XZ
+var _target := Vector2.ZERO      # orbit centre, world XZ (eased, applied)
+# Goal state: inputs write here; _process eases the applied state toward it.
+var _g_az := 225.0
+var _g_height := 120.0
+var _g_radius := 215.0
+var _g_target := Vector2.ZERO
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -76,7 +84,7 @@ func _rebuild() -> void:
 	city = CityScene.new({"seed": seed_value, "time": time_of_day})
 	add_child(city)
 	city.rig.set_band(band)
-	city.rig.set_view(az, height, radius)
+	_snap()
 	print("[plat] built seed %d in %d ms" % [seed_value, Time.get_ticks_msec() - t0])
 	_busy = false
 	if _selftest:
@@ -86,10 +94,8 @@ func _rebuild() -> void:
 ## save a frame, quit. This is how an interactive scene gets the same
 ## "verified by render" treatment as the still pipeline.
 func _run_selftest() -> void:
-	for step in [["pan", func() -> void: _pan(1.0, 0.4, 1.0)],
-			["recentre", func() -> void:
-				_target = city._plan.core_center
-				_push()],
+	for step in [["pan", func() -> void: _pan_pixels(-400.0, 300.0)],
+			["recentre", func() -> void: _g_target = city._plan.core_center],
 			["orbit", func() -> void: _orbit(45.0)],
 			["dolly", func() -> void: _dolly(30.0)],
 			["height", func() -> void: _height(25.0)],
@@ -97,6 +103,7 @@ func _run_selftest() -> void:
 			["band far", func() -> void: _set_band("far")],
 			["band near", func() -> void: _set_band("near")]]:
 		(step[1] as Callable).call()
+		_snap()
 		await get_tree().process_frame
 		print("[plat] selftest %s -> %s" % [step[0], city.rig.describe()])
 	for i in range(20):
@@ -110,23 +117,29 @@ func _run_selftest() -> void:
 	get_tree().quit(0)
 
 # --- camera moves, all through the clamping rig --------------------------
+# Inputs write GOALS; _process eases the applied state toward them, which
+# is what turns every move into a glide.
 
 func _orbit(d: float) -> void:
-	az = fposmod(az + d, 360.0)
-	_push()
+	_g_az += d
 
 func _dolly(d: float) -> void:
-	radius += d
-	_push()
+	_g_radius += d
 
 func _height(d: float) -> void:
-	height += d
-	_push()
+	_g_height += d
 
 func _set_band(b: String) -> void:
 	band = b
 	city.rig.set_band(b)
-	# Re-push so the rig re-clamps our numbers into the new band's range.
+	_push()
+
+## Snap applied state to goals instantly (rebuilds, selftest determinism).
+func _snap() -> void:
+	az = _g_az
+	height = _g_height
+	radius = _g_radius
+	_target = _g_target
 	_push()
 
 func _push() -> void:
@@ -134,25 +147,21 @@ func _push() -> void:
 		city.rig.set_target_xz(_target.x, _target.y)
 		city.rig.set_view(az, height, radius)
 
-## Travel across the city, in the direction the camera is FACING (W is
-## always "away from me"), clamped to the island so you cannot wander off
-## into empty harbour and lose the city behind you.
-func _pan(forward: float, strafe: float, delta: float) -> void:
+## Grab-the-ground pan: a drag of (dx, dy) screen pixels slides the city so
+## the ground tracks the cursor. Metres-per-pixel comes from the current
+## radius and the camera's vertical FOV over the viewport height.
+func _pan_pixels(dx: float, dy: float) -> void:
+	var vp_h := float(get_viewport().get_visible_rect().size.y)
+	var mpp := 2.0 * radius * tan(deg_to_rad(37.5)) / maxf(vp_h, 1.0)
 	var a := deg_to_rad(az)
-	# The camera sits at azimuth `az` from the target and looks inward, so
-	# "forward" is the inward direction.
-	var fwd := Vector2(-sin(a), cos(a))
+	var fwd := Vector2(-sin(a), cos(a))     # inward, toward the target
 	var right := Vector2(cos(a), sin(a))
-	var speed := radius * PAN_FACTOR * delta
-	if Input.is_key_pressed(KEY_SHIFT):
-		speed *= 3.0
-	_target += (fwd * forward + right * strafe) * speed
+	_g_target += (right * -dx + fwd * dy) * mpp
 	var limit := 2600.0
 	if city and city._plan != null:
-		limit = city._plan.city_limit(atan2(_target.y, _target.x)) + 400.0
-	if _target.length() > limit:
-		_target = _target.normalized() * limit
-	_push()
+		limit = city._plan.city_limit(atan2(_g_target.y, _g_target.x)) + 400.0
+	if _g_target.length() > limit:
+		_g_target = _g_target.normalized() * limit
 
 func _process(delta: float) -> void:
 	_fps_accum += delta
@@ -163,30 +172,32 @@ func _process(delta: float) -> void:
 		_fps_frames = 0
 	if _busy:
 		return
+	# Arrow keys pan, like a map's keyboard controls.
+	var vp := get_viewport().get_visible_rect().size
+	var px := KEY_PAN * vp.y * delta
 	if Input.is_key_pressed(KEY_LEFT):
-		_orbit(-ORBIT_SPEED * delta)
+		_pan_pixels(-px, 0.0)
 	if Input.is_key_pressed(KEY_RIGHT):
-		_orbit(ORBIT_SPEED * delta)
+		_pan_pixels(px, 0.0)
 	if Input.is_key_pressed(KEY_UP):
-		_dolly(-DOLLY_SPEED * delta)
+		_pan_pixels(0.0, -px)
 	if Input.is_key_pressed(KEY_DOWN):
-		_dolly(DOLLY_SPEED * delta)
+		_pan_pixels(0.0, px)
 	if Input.is_key_pressed(KEY_PAGEUP):
-		_height(60.0 * delta)
+		_height(90.0 * delta)
 	if Input.is_key_pressed(KEY_PAGEDOWN):
-		_height(-60.0 * delta)
-	var fwd := 0.0
-	var strafe := 0.0
-	if Input.is_key_pressed(KEY_W):
-		fwd += 1.0
-	if Input.is_key_pressed(KEY_S):
-		fwd -= 1.0
-	if Input.is_key_pressed(KEY_D):
-		strafe += 1.0
-	if Input.is_key_pressed(KEY_A):
-		strafe -= 1.0
-	if fwd != 0.0 or strafe != 0.0:
-		_pan(fwd, strafe, delta)
+		_height(-90.0 * delta)
+	# The easeTo glide: applied state approaches the goal exponentially.
+	var t := 1.0 - exp(-EASE * delta)
+	az = lerpf(az, _g_az, t)
+	height = lerpf(height, _g_height, t)
+	radius = lerpf(radius, _g_radius, t)
+	_target = _target.lerp(_g_target, t)
+	_push()
+	# The rig clamped what we pushed; pull the clamp back into the goals so
+	# they cannot run away past a band edge while the user keeps dragging.
+	_g_height = clampf(_g_height, height - 200.0, height + 200.0)
+	_g_radius = clampf(_g_radius, radius - 400.0, radius + 400.0)
 	_update_hud()
 
 func _update_hud() -> void:
@@ -198,7 +209,8 @@ func _update_hud() -> void:
 	var help := ""
 	if _help_visible:
 		help = ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
-				+ "\nWASD travel (Shift faster)   C re-centre downtown"
+				+ "\nleft-drag pan   right-drag rotate/tilt   wheel zoom"
+				+ "\narrows pan   PgUp/PgDn height   C re-centre downtown"
 				+ "\n1 2 3 band   T/G time   N new city   F preset view"
 				+ "\nH help   F12 screenshot   Esc quit")
 	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s" % [
@@ -211,15 +223,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
-			_dragging = mb.pressed
+			_panning = mb.pressed
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			_rotating = mb.pressed
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_dolly(-radius * WHEEL_STEP)
+			_dolly(-_g_radius * WHEEL_STEP)
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_dolly(radius * WHEEL_STEP)
-	elif event is InputEventMouseMotion and _dragging:
+			_dolly(_g_radius * WHEEL_STEP)
+	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		_orbit(mm.relative.x * DRAG_SENSITIVITY)
-		_height(-mm.relative.y * DRAG_SENSITIVITY * 2.0)
+		if _panning:
+			_pan_pixels(mm.relative.x, mm.relative.y)
+		elif _rotating:
+			_orbit(mm.relative.x * ROTATE_SENSITIVITY)
+			_height(-mm.relative.y * TILT_SENSITIVITY)
 	elif event is InputEventKey and (event as InputEventKey).pressed \
 			and not (event as InputEventKey).echo:
 		match (event as InputEventKey).keycode:
@@ -241,10 +258,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_rebuild()
 			KEY_C:
 				# Back to downtown — easy to get lost on a 5 km island.
-				_target = Vector2.ZERO
+				_g_target = Vector2.ZERO
 				if city and city._plan != null:
-					_target = city._plan.core_center
-				_push()
+					_g_target = city._plan.core_center
 			KEY_F:
 				_cycle_preset()
 			KEY_H:
@@ -263,21 +279,20 @@ func _cycle_preset() -> void:
 	match _preset:
 		0:
 			band = "near"
-			az = 200.0
-			height = 140.0
-			radius = 240.0
+			_g_az = 200.0
+			_g_height = 140.0
+			_g_radius = 240.0
 		1:
 			band = "mid"
-			az = 100.0
-			height = 420.0
-			radius = 880.0
+			_g_az = 100.0
+			_g_height = 420.0
+			_g_radius = 880.0
 		2:
 			band = "far"
-			az = 20.0
-			height = 1150.0
-			radius = 1900.0
+			_g_az = 20.0
+			_g_height = 1150.0
+			_g_radius = 1900.0
 	city.rig.set_band(band)
-	_push()
 
 func _screenshot() -> void:
 	var img := get_viewport().get_texture().get_image()

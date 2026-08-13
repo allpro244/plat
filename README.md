@@ -36,11 +36,12 @@ want headless renders on a machine without a GPU.
 
 | input | does |
 |---|---|
-| `W` `A` `S` `D` | travel across the city (hold Shift to move faster) |
-| `C` | re-centre on downtown |
-| drag / ← → | orbit |
-| wheel / ↑ ↓ | dolly in-out |
+| left-drag | grab the ground and pan — the city slides with the cursor |
+| right-drag | rotate (x) and tilt (y) |
+| wheel | zoom (clamped to the band) |
+| arrows | pan (map-style keyboard controls) |
 | PgUp / PgDn | height |
+| `C` | re-centre on downtown |
 | `1` `2` `3` | near / mid / far camera band |
 | `T` / `G` | time of day (rebuilds; sun and lit windows follow) |
 | `N` | **new city** — fresh random seed, whole island regenerates |
