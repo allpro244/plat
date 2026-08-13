@@ -81,7 +81,12 @@ func _rebuild() -> void:
 		remove_child(city)
 		city.queue_free()
 	var t0 := Time.get_ticks_msec()
-	city = CityScene.new({"seed": seed_value, "time": time_of_day})
+	# GI off in the INTERACTIVE viewer, on for stills. SDFGI accumulates
+	# temporally — parked cameras converge to a clean image, but in flight
+	# the cascades re-converge forever, which reads as a smeared, blotchy
+	# distortion crawling over distant buildings (owner-reported). The
+	# non-GI ambient path is calibrated for exactly this fallback.
+	city = CityScene.new({"seed": seed_value, "time": time_of_day, "gi": false})
 	add_child(city)
 	city.rig.set_band(band)
 	_snap()

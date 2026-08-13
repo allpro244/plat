@@ -12,5 +12,5 @@ window/size/viewport_height=900
 
 [rendering]
 renderer/rendering_method="forward_plus"
-anti_aliasing/quality/msaa_3d=2
-textures/default_filters/anisotropic_filtering_level=4
+anti_aliasing/quality/msaa_3d=3
+textures/default_filters/anisotropic_filtering_level=16
