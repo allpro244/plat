@@ -25,12 +25,27 @@ void fragment() {
 	ALBEDO = vtint * base_mul;
 	ROUGHNESS = 0.9;
 	METALLIC = 0.0;
-	if (vlit > 0.001 && wallness > 0.5) {
-		// One cell per ~bay-and-floor; lit dot fills the middle of it.
+	if (wallness <= 0.5) {
+		// Roofs: built-up roofing reads darker and greyer than the walls
+		// below it. From the bands, most of the frame IS roofs — leaving
+		// them wall-colored made the whole far city look like stucco.
+		ALBEDO = mix(vec3(dot(ALBEDO, vec3(0.333))), ALBEDO, 0.2) * 0.32;
+	}
+	if (wallness > 0.5) {
+		// One cell per ~bay-and-floor; the window fills the middle of it.
 		vec2 cell = floor(muv / vec2(3.4, 3.3));
 		vec2 sub = fract(muv / vec2(3.4, 3.3));
 		float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-		if (h < vlit && abs(sub.x - 0.5) < 0.22 && abs(sub.y - 0.5) < 0.26) {
+		bool in_win = abs(sub.x - 0.5) < 0.22 && abs(sub.y - 0.5) < 0.26;
+		// Daylight fenestration: dark glass cells so a distant facade reads
+		// as a building, not an untextured slab. Fades with screen coverage
+		// like the lights, for the same anti-glitter reason.
+		if (in_win) {
+			float pxa = fwidth(muv.x) + 0.001;
+			ALBEDO *= mix(1.0, 0.42, clamp(1.9 / pxa, 0.0, 1.0));
+			ROUGHNESS = 0.4;
+		}
+		if (h < vlit && in_win) {
 			float v = fract(h * 61.17);
 			// When a window cell shrinks below a couple of pixels the dots
 			// alias into glitter; scale energy by screen coverage so a

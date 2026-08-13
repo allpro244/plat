@@ -32,6 +32,7 @@ var blocks := []           # {key, x, z, angle, w, d, dist, district}
 var core_center := Vector2.ZERO   # world meters
 var _district_centers := []       # [[Vector2, type], ...]
 var _limit_h := []                # city-limit harmonics: [[amp, freq, phase], ...]
+var _limit_base := 0.88           # mean coastline radius, fraction of CITY_R
 
 ## Per-district generation parameters, consumed by ContextGen.
 ## height_mul scales the base distribution; cap clamps it; mass_w widens
@@ -63,8 +64,9 @@ func _init(city_seed: int) -> void:
 	# first cut at this hashed a radius per block, which frayed the edge but
 	# left lone blocks floating in empty asphalt; a smooth lobed limit reads as a
 	# city that grew unevenly, with no orphans.
+	_limit_base = rng.randf_range(0.74, 0.96)   # island size is identity too
 	for k in range(3):
-		_limit_h.append([rng.randf_range(0.04, 0.11), float(rng.randi_range(1, 4)),
+		_limit_h.append([rng.randf_range(0.06, 0.16), float(rng.randi_range(1, 4)),
 				rng.randf_range(0.0, TAU)])
 	_make_domains(rng)
 	_make_boulevards(rng)
@@ -110,13 +112,13 @@ func _make_boulevards(rng: RandomNumberGenerator) -> void:
 		boulevards.append({"p": n * offset, "dir": dir,
 				"w": rng.randf_range(30.0, 44.0)})
 
-func _make_water(rng: RandomNumberGenerator) -> void:
-	# ~55% of cities get a waterfront. The shoreline is a half-plane at a
-	# seeded ANGLE — an axis-aligned shore was the old grid showing through.
-	if rng.randf() < 0.55:
-		var ang := rng.randf_range(0.0, TAU)
-		water = {"n": Vector2(cos(ang), sin(ang)),
-				"d": rng.randf_range(750.0, 1800.0)}
+func _make_water(_rng: RandomNumberGenerator) -> void:
+	# Every city is an ISLAND: the lobed city limit IS the coastline, and
+	# everything beyond it is harbor. The strongest identity feature a city
+	# silhouette has, and it makes the edge a designed thing (esplanade,
+	# seawall, skyline against water) instead of fabric fading into ground
+	# that belongs to nobody.
+	water = {"island": true}
 
 func _make_parks(rng: RandomNumberGenerator) -> void:
 	# 3-6 parks as world rectangles aligned to their owning domain's grid.
@@ -157,7 +159,8 @@ func _nearest_domain(p: Vector2) -> int:
 	return best
 
 func _in_water(p: Vector2) -> bool:
-	return not water.is_empty() and p.dot(water["n"]) > float(water["d"]) - 50.0
+	# Inside the coastline, with a margin for the esplanade ring.
+	return p.length() > city_limit(atan2(p.y, p.x)) - 55.0
 
 func _in_park(p: Vector2) -> bool:
 	for pk in parks:
@@ -188,7 +191,7 @@ func _district_of(p: Vector2) -> String:
 ## Where the city ends in a given direction: a lobed, seeded closed curve
 ## (mean ~0.88 CITY_R, lobes ±~20%) — a city that grew unevenly, not a circle.
 func city_limit(bearing: float) -> float:
-	var f := 0.88
+	var f := _limit_base
 	for h in _limit_h:
 		f += float(h[0]) * sin(bearing * float(h[1]) + float(h[2]))
 	return CITY_R * f
@@ -244,8 +247,10 @@ func _make_blocks() -> void:
 		var d: Dictionary = domains[di]
 		var pitch_x: float = float(d["bw"]) + float(d["rx"])
 		var pitch_z: float = float(d["bd"]) + float(d["rz"])
-		var n_i := int(ceil((CITY_R * 2.2) / pitch_x))
-		var n_j := int(ceil((CITY_R * 2.2) / pitch_z))
+		# Cover the WHOLE island from any domain center: a lobe can reach
+		# 1.12x CITY_R while a domain sits 2100 m the other side of it.
+		var n_i := int(ceil((CITY_R * 3.0) / pitch_x))
+		var n_j := int(ceil((CITY_R * 3.0) / pitch_z))
 		var ang: float = float(d["angle"])
 		var u := Vector2(cos(ang), sin(ang))
 		var v := Vector2(-sin(ang), cos(ang))

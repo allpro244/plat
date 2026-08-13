@@ -7,7 +7,7 @@ shader_type spatial;
 render_mode cull_back;
 
 uniform vec3 deep_color = vec3(0.045, 0.075, 0.095);
-uniform float wave_strength = 0.05;
+uniform float wave_strength = 0.038;
 
 varying vec3 wpos;
 
@@ -24,7 +24,7 @@ void fragment() {
 	// octave fades out as its wavelength approaches the pixel footprint —
 	// unattenuated, the fine chop aliased into moire bands at range.
 	float px = fwidth(wpos.x) + fwidth(wpos.z) + 0.001;
-	float a1 = clamp(30.0 / px, 0.0, 1.0);
+	float a1 = clamp(70.0 / px, 0.0, 1.0);
 	float a2 = clamp(9.0 / px, 0.0, 1.0);
 	float a3 = clamp(3.0 / px, 0.0, 1.0);
 	// A slow incommensurate envelope breaks the sinusoids' periodicity —

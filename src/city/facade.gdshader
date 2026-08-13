@@ -47,15 +47,26 @@ uniform float lit_energy = 0.9;
 
 varying vec2 muv;
 varying vec3 vtint;
+varying float wallness;   // 1 on vertical faces, 0 on roofs
 
 void vertex() {
 	muv = UV;
 	// Per-mass tint for merged context meshes rides vertex color (defaults
 	// to white on meshes that do not set it).
 	vtint = COLOR.rgb;
+	wallness = 1.0 - abs((MODEL_MATRIX * vec4(NORMAL, 0.0)).y);
 }
 
 void fragment() {
+	if (wallness < 0.5) {
+		// Roof plane: built-up roofing, not wall material. The top faces of
+		// merged context masses live in this surface, and painting them in
+		// facade colors made every aerial frame read as pale stucco.
+		// (No early return: the shading language forbids it in fragment().)
+		ALBEDO = vec3(0.115, 0.112, 0.108) * (0.7 + 0.6 * vtint.r);
+		ROUGHNESS = 0.95;
+		METALLIC = 0.0;
+	} else {
 	float y = muv.y;
 	float fy;
 	float wx;
@@ -125,5 +136,6 @@ void fragment() {
 			AO = texture(wall_ao, wuv).r;
 			AO_LIGHT_AFFECT = 0.35;
 		}
+	}
 	}
 }

@@ -17,6 +17,7 @@ var rig: CameraRig
 var sun_info: Dictionary
 var sky_sun_delta_deg := 0.0
 var _matlib := {}
+var _plan: CityPlan = null
 
 static func defaults() -> Dictionary:
 	return {
@@ -47,6 +48,11 @@ func _ready() -> void:
 	_matlib = _load_material_library()
 	_build_environment()
 	_build_sun()
+	# The plan must exist before the ground: the island's coastline IS the
+	# plan's lobed city limit. Diagnostic no-context runs keep a flat slab.
+	if not params.get("no_context", false):
+		_plan = CityPlan.new(int(params["seed"]))
+		print("[plat] ", _plan.describe())
 	_build_ground()
 	# Dusk factor from the sun the environment just derived: fades in below
 	# 14 deg elevation, full by 4 deg. Drives lit windows everywhere.
@@ -57,13 +63,11 @@ func _ready() -> void:
 	MeshBuilder.skip_props = params.get("skip_props", false)
 	if not params.get("no_block", false):
 		_build_block()
-	if not params.get("no_context", false):
-		var plan := CityPlan.new(int(params["seed"]))
-		print("[plat] ", plan.describe())
-		add_child(ContextGen.build(int(params["seed"]), _matlib, plan, night))
-		_build_plan_features(plan)
+	if _plan != null:
+		add_child(ContextGen.build(int(params["seed"]), _matlib, _plan, night))
+		_build_plan_features(_plan)
 		if not params.get("skip_ground", false):
-			add_child(GroundGen.build(int(params["seed"]), plan,
+			add_child(GroundGen.build(int(params["seed"]), _plan,
 					_ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0),
 					_paint_material(), _grass_material()))
 	rig = CameraRig.new()
@@ -246,12 +250,16 @@ func _build_sun() -> void:
 	light.shadow_bias = 0.05
 
 func _build_ground() -> void:
-	# Streets: one large asphalt plane under everything. The scan tiles at
-	# ~6 m so aggregate reads as texture, not gravel, from the near band.
+	# Streets: one asphalt surface under everything. With a plan, that
+	# surface is the ISLAND — a radial fan following the lobed coastline,
+	# with a skirt dropping below the waterline so the city stands out of
+	# its harbor on a visible edge. The scan tiles at ~6 m so aggregate
+	# reads as texture, not gravel, from the near band.
 	var asphalt := _ground_material("asphalt", Color(0.21, 0.21, 0.215), 0.92, 6.0)
-	# Out to the fog horizon from the far band, so the sky photo's ground
-	# never shows past the city edge.
-	_slab(Vector2(-9000, -9000), Vector2(9000, 9000), 0.0, asphalt)
+	if _plan == null:
+		_slab(Vector2(-9000, -9000), Vector2(9000, 9000), 0.0, asphalt)
+	else:
+		_build_island(asphalt)
 	# Sidewalks: a concrete apron around the block at curb height.
 	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
 	var hx := BlockGen.BLOCK_HALF_X
@@ -267,6 +275,39 @@ func _build_ground() -> void:
 ## Parks and water from the city plan. A park is mown ground aligned to its
 ## domain's grid; water is one reflective plane covering the half-plane
 ## beyond the (angled) shoreline.
+## The island: a radial fan of ground following the coastline, its rim just
+## past the esplanade, and a skirt dropping below the waterline so the city
+## stands out of the harbor on a real edge. 2 deg steps keep the rim smooth
+## against the lobed limit curve.
+func _build_island(top_mat: Material) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(-1)
+	var steps := 180
+	var center := Vector3.ZERO
+	for i in range(steps):
+		var b0 := TAU * float(i) / float(steps)
+		var b1 := TAU * float(i + 1) / float(steps)
+		var r0: float = _plan.city_limit(b0) + 6.0
+		var r1: float = _plan.city_limit(b1) + 6.0
+		var p0 := Vector3(cos(b0) * r0, 0.0, sin(b0) * r0)
+		var p1 := Vector3(cos(b1) * r1, 0.0, sin(b1) * r1)
+		for q in [center, p0, p1]:
+			st.set_uv(Vector2(q.x, q.z))
+			st.add_vertex(q)
+		# Skirt: rim down to -4 m; the strip above the waterline reads as
+		# the seawall's wet concrete base.
+		var d0 := p0 + Vector3(0, -4.0, 0)
+		var d1 := p1 + Vector3(0, -4.0, 0)
+		for q in [p1, p0, d0, p1, d0, d1]:
+			st.set_uv(Vector2(q.x + q.z, q.y))
+			st.add_vertex(q)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = top_mat
+	add_child(mi)
+
 ## Road paint: aged white thermoplastic, not pure white — fresh paint is
 ## ~0.75 reflectance and city paint weathers well below that.
 func _paint_material() -> StandardMaterial3D:
@@ -286,32 +327,32 @@ func _build_plan_features(plan: CityPlan) -> void:
 	for pk in plan.parks:
 		_slab_rot(pk["center"], Vector2(float(pk["w"]) + 6.0, float(pk["d"]) + 6.0),
 				float(pk["angle"]), 0.10, grass)
-	if not plan.water.is_empty():
-		var water := ShaderMaterial.new()
-		water.shader = preload("res://src/city/water.gdshader")
-		# One huge slab whose near edge lies on the shoreline: dot(p,n)=d.
-		# Sized so its far corners sit beyond the fog horizon from any band.
-		var n: Vector2 = plan.water["n"]
-		var d: float = plan.water["d"]
-		var shore_ang := atan2(n.y, n.x)
-		_slab_rot(n * (d + 9000.0), Vector2(18000.0, 24000.0), shore_ang, 0.04, water)
-		# The city meets its water on built edge, not raw asphalt: an
-		# esplanade walk at curb height with a seawall lip over the drop.
-		# Segmented and clipped to the lobed city limit, like the medians.
-		var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
-		var wall := StandardMaterial3D.new()
-		wall.albedo_color = Color(0.42, 0.40, 0.37)   # weathered harbor concrete
-		wall.roughness = 0.9
-		var tangent := Vector2(-n.y, n.x)
-		var t := -CityPlan.CITY_R * 1.2
-		while t < CityPlan.CITY_R * 1.2:
-			var c: Vector2 = n * (d - 12.0) + tangent * (t + 30.0)
-			if c.length() < plan.city_limit(atan2(c.y, c.x)) * 1.04:
-				_slab_rot(n * (d - 12.0) + tangent * (t + 30.0), Vector2(22.0, 60.5),
-						shore_ang, 0.15, walk)
-				_slab_rot(n * (d - 1.6) + tangent * (t + 30.0), Vector2(1.4, 60.5),
-						shore_ang, 1.05, wall)
-			t += 60.0
+	# Harbor: water everywhere beyond the island, top at -1.5 m so the
+	# island's skirt shows ~1.5 m of seawall base above the waterline.
+	var water := ShaderMaterial.new()
+	water.shader = preload("res://src/city/water.gdshader")
+	var wmi := MeshInstance3D.new()
+	var wbox := BoxMesh.new()
+	wbox.size = Vector3(26000.0, 0.3, 26000.0)
+	wmi.mesh = wbox
+	wmi.material_override = water
+	wmi.position = Vector3(0.0, -1.65, 0.0)
+	add_child(wmi)
+	# The city meets its water on a built edge: an esplanade ring at curb
+	# height with a seawall lip, segmented around the whole coastline.
+	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
+	var wall := StandardMaterial3D.new()
+	wall.albedo_color = Color(0.42, 0.40, 0.37)   # weathered harbor concrete
+	wall.roughness = 0.9
+	var steps := 120
+	for i in range(steps):
+		var b := TAU * (float(i) + 0.5) / float(steps)
+		var lim := plan.city_limit(b)
+		var seg := lim * TAU / float(steps) + 4.0
+		var tang := b + PI * 0.5
+		var c := Vector2(cos(b), sin(b))
+		_slab_rot(c * (lim - 14.0), Vector2(seg, 26.0), tang, 0.15, walk)
+		_slab_rot(c * (lim - 1.0), Vector2(seg, 1.6), tang, 1.05, wall)
 
 ## A slab centered at `center` with plan-frame X size size.x / Z size size.y,
 ## turned by `angle` (the plan's rotation convention: local +X maps to world
