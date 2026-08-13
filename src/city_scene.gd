@@ -226,7 +226,10 @@ func _build_sun() -> void:
 	var warm := clampf(1.0 - el / 35.0, 0.0, 1.0)
 	light.light_color = Color(1.0, 1.0 - 0.25 * warm, 1.0 - 0.45 * warm)
 	light.shadow_enabled = true
-	light.directional_shadow_max_distance = 800.0
+	# 500 m covers the hero block and first context ring from every band-1
+	# camera position; the tighter range buys visibly crisper shadow edges
+	# from the same 4k atlas.
+	light.directional_shadow_max_distance = 500.0
 	light.shadow_bias = 0.05
 
 func _build_ground() -> void:
@@ -312,6 +315,9 @@ func _ground_material(slot: String, fallback: Color, rough: float, coverage_m: f
 	var tex: Dictionary = _matlib.get(slot, {})
 	if tex.has("albedo"):
 		m.albedo_texture = tex["albedo"]
+		# Scans are captured clean; street asphalt runs darker than a fresh
+		# scan in every real aerial photo. Modulate rather than repaint.
+		m.albedo_color = Color(0.62, 0.62, 0.64) if slot == "asphalt" else Color.WHITE
 		m.normal_enabled = true
 		m.normal_texture = tex["normal"]
 		m.ao_enabled = true
