@@ -12,6 +12,10 @@ uniform sampler2D wall_ao : hint_default_white, repeat_enable, filter_linear_mip
 // brick scale. 0.18 made every brick the size of a boulder.
 uniform float wall_uv_scale = 0.5;
 uniform float wall_roughness : hint_range(0.0, 1.0) = 0.85;
+// Per-pixel roughness scan where the asset profile provides one (primary);
+// the scalar above serves the mirror profile's scan-less set.
+uniform sampler2D wall_roughness_tex : hint_default_white, repeat_enable, filter_linear_mipmap;
+uniform float use_roughness_texture = 0.0;
 uniform float wall_metallic : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 wall_tint : source_color = vec4(1.0);
 uniform float use_wall_texture = 1.0;
@@ -69,7 +73,7 @@ void fragment() {
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
 		ALBEDO = wall_col * wall_tint.rgb;
-		ROUGHNESS = wall_roughness;
+		ROUGHNESS = mix(wall_roughness, texture(wall_roughness_tex, wuv).r, use_roughness_texture);
 		METALLIC = wall_metallic;
 		if (use_wall_texture > 0.5) {
 			NORMAL_MAP = texture(wall_normal, wuv).rgb;

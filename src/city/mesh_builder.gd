@@ -65,6 +65,9 @@ static func _wall_material(f: Dictionary, tex: Dictionary) -> ShaderMaterial:
 		m.set_shader_parameter("wall_normal", tex["normal"])
 		m.set_shader_parameter("wall_ao", tex["ao"])
 		m.set_shader_parameter("use_wall_texture", 1.0)
+		if tex.has("roughness"):
+			m.set_shader_parameter("wall_roughness_tex", tex["roughness"])
+			m.set_shader_parameter("use_roughness_texture", 1.0)
 	else:
 		m.set_shader_parameter("use_wall_texture", 0.0)
 	m.set_shader_parameter("wall_tint", f["tint"])
@@ -143,6 +146,10 @@ static func _st() -> SurfaceTool:
 	return st
 
 static func _commit(mesh: ArrayMesh, st: SurfaceTool, mat: Material) -> void:
+	# An untouched SurfaceTool has no vertices; generate_tangents errors on it.
+	var arrays := st.commit_to_arrays()
+	if arrays[Mesh.ARRAY_VERTEX] == null or (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
+		return
 	st.generate_normals()
 	st.generate_tangents()
 	var idx := mesh.get_surface_count()
