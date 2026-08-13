@@ -13,7 +13,10 @@ func _run() -> void:
 	var params := _parse_args()
 	var out_path: String = params.get("out", "renders/shot.png")
 	var city := CityScene.new(params)
-	root.add_child(city)
+	var tb := Time.get_ticks_msec()
+	root.add_child(city)   # _ready() generates the whole city here
+	print("[plat] build: %d ms (plan + all mesh generation, single-threaded CPU)" % [
+			Time.get_ticks_msec() - tb])
 	var t0 := Time.get_ticks_msec()
 	for i in range(SETTLE_FRAMES):
 		await process_frame
@@ -30,6 +33,14 @@ func _run() -> void:
 		printerr("[plat] FAILED to save ", abs_out, " err=", err)
 		quit(1)
 		return
+	# Hardware-independent cost numbers. These, not lavapipe milliseconds,
+	# are what predict performance on a real GPU.
+	print("[plat] scene: %d draw calls, %s prims, %.0f MB buffers, %.0f MB textures" % [
+			RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+			String.num_uint64(RenderingServer.get_rendering_info(
+					RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)),
+			float(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)) / 1048576.0,
+			float(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)) / 1048576.0])
 	print("[plat] shot ", img.get_width(), "x", img.get_height(), " -> ", abs_out)
 	print("[plat] ", city.describe())
 	quit(0)
