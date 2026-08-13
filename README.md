@@ -55,10 +55,18 @@ Headless rendering uses the real Forward+/Vulkan renderer through lavapipe
 (software Vulkan) under Xvfb. Godot's `--headless` flag would swap in the
 dummy renderer — `tools/shoot.sh` uses Xvfb precisely to avoid that.
 
-The asset script prefers first-party Poly Haven URLs (full 4-map PBR set, 4k
-sky) and falls back to pinned GitHub mirrors of the same CC0 scan data when
-only github.com is reachable (the case in the sandbox this was built in). The
-mirror brick set has albedo/normal/AO but no per-pixel roughness scan;
-masonry there uses a scalar roughness — brick is uniformly matte, so that is
-a material fact, not a look tweak. The mirror sky is 1k and low-sun, which is
-why the default shot is an evening.
+The asset script prefers first-party Poly Haven URLs and falls back to pinned
+GitHub mirrors of the same CC0 scan data when only github.com is reachable
+(the case in the sandbox this was built in). **Both profiles serve the same
+sky** — `spruit_sunrise`, at 4k from Poly Haven or 1k from the mirror — so the
+picture cannot silently depend on which network built it. A panorama's sun
+elevation is baked in and cannot be rotated away, so the scene's default time
+of day (19:40 EDT, 21 June) is the time at which the computed solar elevation
+for this latitude matches the sky's measured 7.7°. `CityScene` measures the
+sky's sun at load and warns if the two disagree by more than 8°; every shot
+prints the delta as `sky_delta`.
+
+The profiles still differ in one respect: the mirror brick set has
+albedo/normal/AO but no per-pixel roughness scan, so masonry there uses a
+scalar roughness — brick is uniformly matte, so that is a material fact, not
+a look tweak.

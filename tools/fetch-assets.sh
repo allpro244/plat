@@ -5,7 +5,7 @@
 #
 # Two source profiles:
 #   primary — first-party Poly Haven CDN (full scan sets incl. per-pixel
-#             roughness). Preferred wherever the network can reach it.
+#             roughness, 4k sky). Preferred wherever the network can reach it.
 #   mirror  — GitHub-hosted copies of the same CC0 scan data (via
 #             godotengine/godot-demo-projects, pinned to a commit). Used
 #             automatically when the primary CDN is unreachable — some
@@ -36,8 +36,11 @@ fetch() { # fetch <url> <dest> <sha256|->
   mv "$dest.part" "$dest"
 }
 
+# Probe the exact sky we intend to fetch, not a stand-in: a reachable CDN
+# that does not carry this asset must fall back, not fail halfway through.
+SKY_PRIMARY="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/4k/spruit_sunrise_4k.hdr"
 primary_reachable() {
-  curl -fsSL --max-time 10 -o /dev/null "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr" 2>/dev/null
+  curl -fsSL --max-time 15 -r 0-1023 -o /dev/null "$SKY_PRIMARY" 2>/dev/null
 }
 
 if primary_reachable; then
@@ -48,8 +51,12 @@ if primary_reachable; then
   fetch "$PH/Textures/jpg/2k/brick_wall_001/brick_wall_001_nor_gl_2k.jpg"  "$DEST/brick/normal.jpg" -
   fetch "$PH/Textures/jpg/2k/brick_wall_001/brick_wall_001_ao_2k.jpg"      "$DEST/brick/ao.jpg" -
   fetch "$PH/Textures/jpg/2k/brick_wall_001/brick_wall_001_rough_2k.jpg"   "$DEST/brick/roughness.jpg" -
-  # partly-cloudy pure sky, CC0 (polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky)
-  fetch "$PH/HDRIs/hdr/4k/kloofendal_48d_partly_cloudy_puresky_4k.hdr"     "$DEST/sky/sky.hdr" -
+  # spruit_sunrise, CC0 (polyhaven.com/a/spruit_sunrise) — the SAME sky the
+  # mirror profile serves, at 4k instead of 1k. Both profiles must agree on
+  # WHICH sky, or the picture silently depends on which network built it: the
+  # sun elevation is baked into the panorama and the scene's default time of
+  # day is chosen to match it (see CityScene.defaults).
+  fetch "$SKY_PRIMARY"                                                     "$DEST/sky/sky.hdr" -
 else
   echo "== profile: mirror (GitHub; Poly Haven CDN unreachable from this network) =="
   fetch "$MT/test_materials/texture_bricks.jpg"        "$DEST/brick/albedo.jpg" \
@@ -58,10 +65,9 @@ else
     8418b9a014649cc120633aba9d7afb50a9594adfd0196bba8495d602fea6def7
   fetch "$MT/test_materials/texture_bricks_ao.jpg"     "$DEST/brick/ao.jpg" \
     75be56696c45cbd086c92d7f631b5b194dea4b88825db1c978c2f5d010b6f06f
-  # "spruit_sunrise" (Poly Haven CC0), mirrored in google/model-viewer's
-  # shared assets: an open low-sun sky, the only true sky HDRI reachable
-  # over github.com. 1k — the primary profile's 4k sky replaces it wherever
-  # the Poly Haven CDN is reachable.
+  # spruit_sunrise (Poly Haven CC0), mirrored in google/model-viewer's shared
+  # assets — the only true sky HDRI reachable over github.com. Same sky as the
+  # primary profile, at 1k.
   MV_COMMIT=297ed2bdbea0c8f921d985ff0c71afd3a819e12e
   fetch "https://raw.githubusercontent.com/google/model-viewer/$MV_COMMIT/packages/shared-assets/environments/spruit_sunrise_1k_HDR.hdr" \
     "$DEST/sky/sky.hdr" \

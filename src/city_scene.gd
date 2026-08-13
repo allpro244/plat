@@ -6,18 +6,27 @@ extends Node3D
 ## nothing in here is hand-placed.
 
 const ASSET_DIR := "res://assets/downloaded"
+## How far the sky's baked sun may sit from the computed sun before the build
+## says so. 8 deg is roughly half an hour of summer sun at this latitude —
+## below that the mismatch is not readable in the image, above it the shadows
+## and the sky start telling different stories.
+const SKY_SUN_TOLERANCE_DEG := 8.0
 
 var params: Dictionary
 var rig: CameraRig
 var sun_info: Dictionary
+var sky_sun_delta_deg := 0.0
 
 static func defaults() -> Dictionary:
 	return {
 		"seed": 1928,
-		# Place and moment. NYC City Hall latitude; a June evening — low warm
-		# sun from the west-northwest, matching the pinned low-sun sky HDRI.
+		# Place and moment. NYC City Hall latitude. The default time is not a
+		# taste choice: the pinned sky HDRI has its sun baked in at a measured
+		# 7.7 deg elevation, and 19.66 EDT on this date is when the computed
+		# solar elevation at this latitude matches it (7.68 deg). Sky and sun
+		# must agree — see _check_sky_sun_agreement.
 		"latitude": 40.7128, "longitude": -74.0060, "utc_offset": -4.0,
-		"year": 2026, "month": 6, "day": 21, "time": 18.75,
+		"year": 2026, "month": 6, "day": 21, "time": 19.66,
 		"band": "near", "cam_azimuth": 222.0, "cam_height": 135.0, "cam_radius": 190.0,
 	}
 
@@ -51,10 +60,12 @@ func _build_environment() -> void:
 		env.background_mode = Environment.BG_SKY
 		env.sky = sky
 		# Rotate the panorama so its baked sun sits at the computed azimuth.
-		# The HDRI's own sun azimuth is measured from the image (brightest
-		# texel), so this stays true for any sky the fetch script pins.
-		var baked_az := _measure_hdri_sun_azimuth(img)
-		env.sky_rotation = Vector3(0.0, deg_to_rad(baked_az - sun["azimuth_deg"]), 0.0)
+		# The HDRI's own sun position is measured from the image, so this stays
+		# true for whatever sky the fetch script pins.
+		var baked: Dictionary = _measure_hdri_sun(img)
+		env.sky_rotation = Vector3(0.0,
+				deg_to_rad(baked["azimuth_deg"] - sun["azimuth_deg"]), 0.0)
+		_check_sky_sun_agreement(baked, sun)
 	else:
 		push_warning("HDRI missing — run tools/fetch-assets.sh. Falling back to flat sky.")
 		env.background_mode = Environment.BG_COLOR
@@ -76,22 +87,46 @@ func _build_environment() -> void:
 	we.environment = env
 	add_child(we)
 
-## Find the brightest texel of the panorama at reduced resolution and return
-## its azimuth in this project's convention (0 = north = -Z, clockwise),
-## for a panorama u=0 at azimuth 180 (Godot maps u=0.5 to -Z).
-func _measure_hdri_sun_azimuth(img: Image) -> float:
+## Locate the sun baked into the panorama: the brightest texel of a reduced
+## copy. Returns {azimuth_deg, elevation_deg} in this project's convention
+## (azimuth 0 = north = -Z, clockwise), for an equirectangular panorama whose
+## u=0.5 column faces -Z and whose v=0 row is the zenith.
+##
+## The convert() is load-bearing and was a silent bug: .hdr files load as
+## FORMAT_RGBE9995, and Image.resize() on an RGBE image yields all-zero pixels
+## without erroring — so this returned a constant rather than a measurement,
+## and the sky was never actually aligned to the sun.
+func _measure_hdri_sun(img: Image) -> Dictionary:
 	var probe: Image = img.duplicate()
+	probe.convert(Image.FORMAT_RGBF)
 	probe.resize(256, 128, Image.INTERPOLATE_BILINEAR)
 	var best := -1.0
 	var best_x := 0
-	for y in range(0, 64):  # sun is in the upper half
+	var best_y := 0
+	for y in range(128):
 		for x in range(256):
 			var c := probe.get_pixel(x, y)
 			var lum := c.r + c.g + c.b
 			if lum > best:
 				best = lum
 				best_x = x
-	return fposmod((float(best_x) / 256.0) * 360.0 + 180.0, 360.0)
+				best_y = y
+	assert(best > 0.0, "HDRI probe read no light — image format not decoded")
+	return {
+		"azimuth_deg": fposmod((float(best_x) / 256.0) * 360.0 + 180.0, 360.0),
+		"elevation_deg": 90.0 - (float(best_y) + 0.5) / 128.0 * 180.0,
+	}
+
+## A panorama can be rotated to any azimuth but its sun elevation is baked in,
+## so a sky and a computed sun can silently disagree about the time of day.
+## Nothing else in the build would notice; this does.
+func _check_sky_sun_agreement(baked: Dictionary, sun: Dictionary) -> void:
+	sky_sun_delta_deg = absf(baked["elevation_deg"] - sun["elevation_deg"])
+	if sky_sun_delta_deg > SKY_SUN_TOLERANCE_DEG:
+		push_warning(("sky/sun disagree by %.1f deg: HDRI sun sits at %.1f deg "
+				+ "elevation, computed sun at %.1f. Pick a time of day nearer the "
+				+ "sky, or pin a sky nearer the time.") % [
+				sky_sun_delta_deg, baked["elevation_deg"], sun["elevation_deg"]])
 
 func _build_sun() -> void:
 	var el: float = sun_info["elevation_deg"]
@@ -177,7 +212,7 @@ func _load_wall_textures() -> Dictionary:
 	return out
 
 func describe() -> String:
-	return "seed=%s date=%04d-%02d-%02d time=%05.2f sun_az=%.1f sun_el=%.1f %s" % [
+	return "seed=%s date=%04d-%02d-%02d time=%05.2f sun_az=%.1f sun_el=%.1f sky_delta=%.1f %s" % [
 		str(params["seed"]), params["year"], params["month"], params["day"],
 		params["time"], sun_info["azimuth_deg"], sun_info["elevation_deg"],
-		rig.describe()]
+		sky_sun_delta_deg, rig.describe()]
