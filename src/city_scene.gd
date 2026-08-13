@@ -54,7 +54,10 @@ func _ready() -> void:
 	if not params.get("no_block", false):
 		_build_block()
 	if not params.get("no_context", false):
-		add_child(ContextGen.build(int(params["seed"]), _matlib))
+		var plan := CityPlan.new(int(params["seed"]))
+		print("[plat] ", plan.describe())
+		add_child(ContextGen.build(int(params["seed"]), _matlib, plan))
+		_build_plan_features(plan)
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.set_band(params["band"])
@@ -250,6 +253,30 @@ func _build_ground() -> void:
 	_slab(Vector2(-hx - 40, hz + BlockGen.AVENUE_WIDTH + 4.5), Vector2(hx + 40, hz + BlockGen.AVENUE_WIDTH + 9), 0.12, walk)
 	_slab(Vector2(-hx - BlockGen.CROSS_STREET_WIDTH - 9, -hz - 40), Vector2(-hx - BlockGen.CROSS_STREET_WIDTH - 4.5, hz + 40), 0.12, walk)
 	_slab(Vector2(hx + BlockGen.CROSS_STREET_WIDTH + 4.5, -hz - 40), Vector2(hx + BlockGen.CROSS_STREET_WIDTH + 9, hz + 40), 0.12, walk)
+
+## Parks and water from the city plan. A park is mown ground with a sidewalk
+## apron; water is a flat reflective plane slightly below street level.
+func _build_plan_features(plan: CityPlan) -> void:
+	var grass := StandardMaterial3D.new()
+	grass.albedo_color = Color(0.30, 0.37, 0.24)
+	grass.roughness = 1.0
+	var water := StandardMaterial3D.new()
+	water.albedo_color = Color(0.08, 0.12, 0.15)
+	water.roughness = 0.03
+	water.metallic = 0.4
+	for cell in plan.cell_type:
+		var x0: float = plan.col_x0[cell.x]
+		var z0: float = plan.row_z0[cell.y]
+		match plan.cell_type[cell]:
+			"park":
+				_slab(Vector2(x0 - 3.0, z0 - 3.0),
+						Vector2(x0 + CityPlan.BLOCK_W + 3.0, z0 + CityPlan.BLOCK_D + 3.0),
+						0.10, grass)
+			"water":
+				# Slightly proud slab per cell; the seam is under fog range.
+				_slab(Vector2(x0 - 30.0, z0 - 20.0),
+						Vector2(x0 + CityPlan.BLOCK_W + 30.0, z0 + CityPlan.BLOCK_D + 20.0),
+						0.04, water)
 
 func _slab(a: Vector2, b: Vector2, top_y: float, mat: Material) -> void:
 	var mi := MeshInstance3D.new()
