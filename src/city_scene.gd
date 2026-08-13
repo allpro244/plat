@@ -30,11 +30,12 @@ static func defaults() -> Dictionary:
 		# sky_delta warning then reports any disagreement.
 		"latitude": 40.7128, "longitude": -74.0060, "utc_offset": -4.0,
 		"year": 2026, "month": 6, "day": 21, "time": null,
-		# Camera azimuth sits ~115 deg off the evening sun so shadows rake
-		# ACROSS the frame. A down-sun view hides every shadow behind its
-		# caster — learned by chasing "broken" shadows that were merely
-		# pointed away from the lens.
-		"band": "near", "cam_azimuth": 130.0, "cam_height": 120.0, "cam_radius": 195.0,
+		# null = derive from the sun: the camera puts the sun over its right
+		# shoulder (sun azimuth - 50 deg), so lit faces AND their shadows are
+		# both in frame for ANY pinned sky. A fixed azimuth kept losing this
+		# fight every time the sky (and so the derived sun) changed. --az
+		# still overrides.
+		"band": "near", "cam_azimuth": null, "cam_height": 120.0, "cam_radius": 195.0,
 		"gi": true,
 	}
 
@@ -57,6 +58,8 @@ func _ready() -> void:
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.set_band(params["band"])
+	if params["cam_azimuth"] == null:
+		params["cam_azimuth"] = fposmod(sun_info["azimuth_deg"] - 50.0, 360.0)
 	rig.set_view(params["cam_azimuth"], params["cam_height"], params["cam_radius"])
 
 func _build_environment() -> void:
