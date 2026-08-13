@@ -72,6 +72,8 @@ func _parse_args() -> Dictionary:
 				p["no_block"] = val == "off"
 			"mats":
 				p["plain_mats"] = val == "plain"
+			"fog":
+				p["no_fog"] = val == "off"
 			"only":
 				p["only_lot"] = val
 			"windows":

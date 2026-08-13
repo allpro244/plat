@@ -33,7 +33,7 @@ static func defaults() -> Dictionary:
 		# ACROSS the frame. A down-sun view hides every shadow behind its
 		# caster — learned by chasing "broken" shadows that were merely
 		# pointed away from the lens.
-		"band": "near", "cam_azimuth": 155.0, "cam_height": 120.0, "cam_radius": 195.0,
+		"band": "near", "cam_azimuth": 130.0, "cam_height": 120.0, "cam_radius": 195.0,
 		"gi": false,
 	}
 
@@ -109,16 +109,17 @@ func _build_environment() -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.6, 0.7, 0.8)
 		env.ambient_light_energy = 1.0
-	# The pinned sky is a rural field, so its ground half bounces green-brown
-	# into every shadow — wrong context for a street canyon, where bounce
-	# comes off masonry and asphalt. Blend the sky ambient toward neutral to
-	# correct the cast; goes away entirely once an urban-horizon sky is pinned.
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_sky_contribution = 0.72
-	env.ambient_light_color = Color(0.72, 0.72, 0.74)
-	env.ambient_light_energy = 0.55
+	# Ambient is a controlled COLOR term, not sky IBL: sky-sourced ambient
+	# ignores the energy dial (verified across two CI runs whose ambient
+	# energy differed 2x with no visible change) and fills every shadow with
+	# full-brightness skylight, flattening the image. The sky still provides
+	# the visible background and specular reflections; diffuse ambient is a
+	# neutral daylight tone at ~1/5 of direct sun, the real clear-sky ratio.
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.58, 0.62, 0.70)
+	env.ambient_light_energy = 0.5
 	# Distance haze: softens the HDRI horizon and gives the skyline depth.
-	env.fog_enabled = true
+	env.fog_enabled = not params.get("no_fog", false)
 	env.fog_light_color = Color(0.75, 0.78, 0.82)
 	env.fog_density = 0.00009
 	env.fog_sky_affect = 0.22
@@ -135,7 +136,7 @@ func _build_environment() -> void:
 		env.sdfgi_bounce_feedback = 0.5
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 6.0
-	env.tonemap_exposure = 1.12
+	env.tonemap_exposure = 1.0 if params.get("no_fog", false) else 1.12
 	env.ssao_enabled = true
 	env.ssao_intensity = 2.0
 	var we := WorldEnvironment.new()
