@@ -43,11 +43,55 @@ past it.
 | Decision | Why |
 |---|---|
 | **Orbital camera, constrained height bands** | The single biggest determinant of achievable fidelity per unit of work. Constraining it buys baked AO, impostors, shell-only buildings and no interiors. See `CLAUDE.md`. |
-| **Godot 4 as the client** | Free, MIT, no account, ~150 MB. Text-based scene files, so an agent authors them directly instead of clicking an editor. Exports both native and web. Headless-capable for CI renders. |
+| **Godot 4 as the client** | Free, MIT, no account, ~150 MB. Text-based scene files, so an agent authors them directly instead of clicking an editor. Headless-capable for CI renders. |
+| **Native build is the product. Forward+ renderer, Vulkan.** | Not a packaging preference — a renderer choice. See below. |
 | **Simulation as an engine-agnostic core** | Makes the renderer decision reversible. If Godot disappoints, the client is replaced and the economy never notices. |
 | **All geometry procedural** | No asset kit. Variety is a shape grammar with a seed. |
 | **CC0 materials, fetched by script** | Poly Haven / ambientCG. No account, no licence tracking, commercial-grade scan data. |
-| **Web preview build on every push** | The review loop is a URL, not a download. This is what makes the project hands-off for the owner. |
+| **Review by rendered image, not by playable build** | CI renders stills and short videos with the real renderer and attaches them. Higher fidelity than a web build and less friction. See below. |
+| **New York massing, a full century of eras** | NYC's zoning history is legible in building *shape*, so eras are different rules rather than different textures. See below. |
+
+### Why native, and why that does not cost the review loop
+
+Godot has two renderers and this decision falls exactly on the split.
+**Forward+ — SDFGI global illumination, volumetric fog, screen-space
+reflections, SSIL/SSAO, compute shaders, cascaded shadows — requires Vulkan
+and does not run in a browser.** A web export gets the Compatibility renderer,
+which is WebGL2 and mobile-tier.
+
+For a city that gap is enormous, because the three things Compatibility cannot
+do are the three things that sell a city. Bounced light between building faces
+is most of what separates a street from a diorama. Atmospheric scattering is
+most of what makes a skyline read as *distance* rather than as flat cutouts.
+Screen-space reflections are what make glass and wet asphalt look like glass
+and wet asphalt. Add the browser's memory ceiling and the absurdity of shipping
+gigabytes of scan textures over HTTP, and web caps the project well below the
+fidelity target stated above.
+
+So the shipping target is native, Forward+, Vulkan.
+
+**The review loop does not suffer for it, and is in fact better.** Every push,
+CI runs the real renderer headless and attaches stills — and, where useful, a
+short orbit or timelapse video — to the pull request. The owner opens a PNG or
+an MP4 in a browser tab: no install, no download, no WASM bundle. That is a
+review of the *actual* renderer at full quality rather than of a degraded
+proxy, which is strictly more informative than a playable web build.
+
+It also collapses two mechanisms into one. `CLAUDE.md` already forbids shipping
+a visual claim without a rendered image, and already specifies pinned-seed
+reference renders as the graphics analogue of `BASELINE.json`. **Those renders
+are the review feed.** Verification and review become the same artefact, so
+neither can quietly rot without the other visibly rotting with it.
+
+Caveat, stated now rather than discovered later: CI runners have no GPU, so
+headless renders go through software Vulkan (lavapipe). The image is identical;
+it is simply slow — seconds to minutes for a still, which is entirely
+acceptable. Long timelapse video is where that stops being free, and is the
+point at which a GPU runner earns its cost.
+
+A playable native build gets produced for real platforms too, but it is an
+occasional download for when the owner actually wants to fly around the city.
+It is not the loop.
 
 ## Decisions deliberately deferred
 
@@ -88,7 +132,10 @@ subject. It is a vertical slice, not a demo.
 1. **Camera rig.** Orbital, locked to the defined height bands, with the band
    definitions written down as data rather than scattered through code.
 2. **Procedural block generator.** One seeded city block, roughly forty
-   buildings, generated from lot polygons by the shape grammar. Era-varied.
+   buildings, generated from lot polygons by the shape grammar. Era-varied —
+   at minimum a pre-1916 lot-line block, a 1916 setback tower and a 1961
+   tower-in-plaza standing on the same street, because the whole argument for
+   a century of eras is that they read differently side by side.
 3. **Materials.** At least one CC0 PBR set correctly applied — albedo,
    roughness, normal, AO — plus an HDRI sky. Fetched by the pinned asset script,
    not committed as binaries.
@@ -141,13 +188,55 @@ Each of these has killed or damaged a real project.
 - **Claiming a look works without rendering it.** See the first rule in
   `CLAUDE.md`.
 
+## The city: New York massing, a century of eras
+
+The generator is tuned for this camera rather than fed by real GIS, so what is
+borrowed from New York is its **rules**, not its parcel data.
+
+This pairing is worth more than it first appears, and the reason is specific:
+**New York's zoning history is legible in building shape.** Its eras are not a
+texture swap, they are different generative rules, which is exactly what a
+shape grammar wants and exactly what makes a century of accretion look earned
+rather than dressed.
+
+| Era | The rule that shapes it | What it looks like |
+|---|---|---|
+| **Pre-1916** | No envelope control. Build straight up from the lot line. | Masonry and cast-iron lofts, 6–12 floors, heavy cornices, punched windows, fire escapes, party walls exposed where a neighbour is shorter. |
+| **1916 Resolution** | The sky-exposure plane: mass must step back as it rises, in proportion to the width of the street it faces. | The wedding-cake ziggurat. Art Deco crowns, setback terraces. Wide avenues permit taller sheer rise than side streets, so the grid itself starts shaping the skyline. |
+| **1961 Resolution** | FAR-based with a plaza bonus: give up ground area, buy height. | Tower-in-a-plaza. Flat glass and steel slabs set back behind an open forecourt. International Style. |
+| **1970s–80s** | Bonus-driven bulk, reaction against the flat slab. | Postmodern crowns, granite cladding, mirrored glass, ornamented tops on otherwise plain shafts. |
+| **1990s–2000s** | Contextual zoning: match the street wall, then tower above it. | Base-and-tower articulation, brick-and-glass hybrids, a defined cornice line continuous along the block. |
+| **2010s+** | Air-rights assembly and engineering, not envelope law. | Slender supertalls, full curtain wall, extreme slenderness ratios, mechanical voids. |
+
+The 1916 sky-exposure plane is the single most valuable rule on this list: it
+generates a whole era's distinctive silhouette from arithmetic on street width.
+Implement it properly and the 1920s and 30s stock builds itself.
+
+### Cheap New York details with an outsized return
+
+These are small geometry with large character, and most of them are *derived
+from data the simulation already has* rather than authored:
+
+- **Rooftop water towers.** Tiny meshes, iconic silhouette, enormous per-block
+  character. Placement follows building age and height, so it is a rule.
+- **Exposed party walls.** A tall building beside a short one shows a blank
+  brick flank, often with ghost signage. This falls straight out of comparing
+  neighbouring parcel heights, which is exactly the sim-owns-quantities /
+  renderer-owns-form line working as intended.
+- **Rooftop mechanical bulkheads, stair overruns, setback terraces.** The
+  roofscape is what this camera actually looks at. It deserves more attention
+  than facades do.
+- **Fire escapes** on pre-war stock, by era rule.
+
+### How eras and the economy line up
+
+The predecessor's simulation starts in 2000 and runs a century. That fits: the
+**existing** stock at game start should show roughly 1900–2000 of accretion,
+and the player's century then writes 2000–2100 on top of it — with the
+generator's era rules continuing to apply to everything the simulation builds.
+A building delivered in game-year 2043 should be visibly of its moment.
+
 ## Open questions for the owner
 
-- Which city, if any, the procedural generator should take its character from.
-  A generator tuned for this camera was chosen over real GIS data; that leaves
-  the *architectural* reference open.
-- Era and start year. The predecessor starts in 2000. A single-era city is
-  cheaper; a century of accreted eras is far more convincing and is what the
-  economy is built to produce.
-- Whether native desktop builds matter, or whether the web build is the
-  product.
+None outstanding. Architectural reference, era span and build target are all
+settled above.
