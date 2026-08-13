@@ -88,7 +88,22 @@ void fragment() {
 	float fh_m = mix(1.0, mix(0.90, 1.12, fract(sb * 13.7)), styled);
 	float wx_m = mix(1.0, mix(0.78, 1.25, fract(sb * 29.3)), styled);
 	float wy_m = mix(1.0, mix(0.85, 1.22, fract(sb * 53.1)), styled);
+	// WINDOW TYPOLOGY: the biggest between-building difference a real
+	// street has. Hash buckets: punched singles / tight pairs / tall
+	// vertical openings / horizontal band windows.
+	float wmode = fract(sb * 3.31) * styled;
 	float bay_w = bay_width * bw_m;
+	if (wmode > 0.5 && wmode < 0.68) {          // paired: twin narrow bays
+		bay_w *= 0.55;
+		wx_m *= 0.82;
+	} else if (wmode >= 0.68 && wmode < 0.86) { // vertical: tall openings
+		wx_m *= 0.85;
+		wy_m *= 1.45;
+	} else if (wmode >= 0.86) {                 // band: wide strip windows
+		bay_w *= 1.6;
+		wx_m *= 1.55;
+		wy_m *= 0.75;
+	}
 	float floor_h = floor_height * fh_m;
 	float ground_h = ground_floor_height * mix(1.0, mix(0.92, 1.14, fract(sb * 91.7)), styled);
 	float mx = muv.x + vstyle.y;   // texture/bay phase offset per building
@@ -124,6 +139,7 @@ void fragment() {
 		ALBEDO = g * (0.45 + 0.55 * smoothstep(1.0, 0.7, edge));
 		ROUGHNESS = glass_roughness;
 		METALLIC = glass_metallic;
+		METALLIC = glass_metallic;
 		// One hash per window CELL: same window, same verdict, every frame.
 		// vtint joins the seed so two masses sharing a material still get
 		// independent patterns.
@@ -146,7 +162,24 @@ void fragment() {
 		}
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
-		ALBEDO = wall_col * wall_tint.rgb * vtint;
+		// PER-BUILDING COLOR: a real street swings from whitewashed paint
+		// to near-black brownstone. Value spread of ~2.5x plus a warm or
+		// cool lean, and occasional painted-over (texture flattened).
+		float val = mix(1.0, mix(0.52, 1.4, fract(sb * 5.71)), styled);
+		float lean = fract(sb * 17.3);
+		vec3 hue = mix(vec3(1.06, 0.98, 0.90), vec3(0.92, 0.97, 1.08),
+				smoothstep(0.3, 0.7, lean));
+		float painted = step(0.82, fract(sb * 11.9)) * styled;
+		wall_col = mix(wall_col, vec3(dot(wall_col, vec3(0.333))) * 1.15, painted * 0.7);
+		ALBEDO = wall_col * wall_tint.rgb * vtint * val * mix(vec3(1.0), hue, styled);
+		// String courses: some facades carry a lighter banding line every
+		// few floors — masonry articulation, not paint.
+		float ks = 2.0 + floor(fract(sb * 23.7) * 4.0);
+		float floor_j = floor(max(y - ground_h, 0.0) / floor_h);
+		if (styled > 0.5 && fract(sb * 41.3) < 0.35 && y > ground_h
+				&& mod(floor_j, ks) == ks - 1.0 && fy > 0.82) {
+			ALBEDO *= mix(1.25, 0.75, step(0.5, fract(sb * 67.1)));
+		}
 		if (windows_enabled > 0.5 && y < ground_h) {
 			// Shopfront band: the street wall of a real mixed-use block is
 			// not brick to the pavement — it is painted storefront surround

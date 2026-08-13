@@ -130,7 +130,8 @@ static func _roofscape(st: SurfaceTool, rng: RandomNumberGenerator, m: Array,
 	var w: float = m[2]
 	var d: float = m[3]
 	var h: float = m[4]
-	st.set_color(Color(0.30, 0.30, 0.31))
+	# Parapet tone varies per building: concrete, painted, dark metal cap.
+	st.set_color(Color(0.30, 0.30, 0.31) * rng.randf_range(0.55, 1.3))
 	# Parapet: the roof edge of a real building stands ~1 m proud, which is
 	# what casts the thin shadow line that reads as "roof" from above.
 	var lip := 0.55
