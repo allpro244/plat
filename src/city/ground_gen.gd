@@ -49,6 +49,20 @@ static func build(seed_value: int, plan: CityPlan, walk_mat: Material,
 				_street_trees(trees, rng, c, Vector2(hw, hd), ang)
 	for bl in plan.boulevards:
 		_median(green, plan, bl)
+	# Parks: scattered canopies over the lawn, one per ~220 m2 — from the
+	# bands a park is a texture of treetops with grass showing through.
+	for pi in range(plan.parks.size()):
+		var pk: Dictionary = plan.parks[pi]
+		var prng := RandomNumberGenerator.new()
+		prng.seed = hash("%d/parktrees/%d" % [seed_value, pi])
+		var n := int(float(pk["w"]) * float(pk["d"]) / 220.0)
+		var u := Vector2(cos(float(pk["angle"])), sin(float(pk["angle"])))
+		var v := Vector2(-u.y, u.x)
+		for k in range(n):
+			var lp: Vector2 = (pk["center"] as Vector2) 					+ u * prng.randf_range(-0.48, 0.48) * float(pk["w"]) 					+ v * prng.randf_range(-0.48, 0.48) * float(pk["d"])
+			var green_c := Color(0.075, 0.115, 0.045) * prng.randf_range(0.75, 1.35)
+			_tree(trees, Vector3(lp.x, 0.10, lp.y), prng.randf_range(3.0, 5.5),
+					prng.randf_range(6.0, 10.0), green_c)
 	for pair in [[walks, walk_mat], [paint, paint_mat], [green, grass_mat],
 			[trees, _tree_material()]]:
 		var mi := _commit(pair[0] as SurfaceTool, pair[1] as Material)

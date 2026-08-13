@@ -279,6 +279,65 @@ func _build_ground() -> void:
 ## Parks and water from the city plan. A park is mown ground aligned to its
 ## domain's grid; water is one reflective plane covering the half-plane
 ## beyond the (angled) shoreline.
+## Distant mainland: low landmasses across the water on seeded bearings,
+## with sparse low massing on top. They exist for the HORIZON — an island
+## city whose ocean runs empty to the sky edge reads as a diorama, and the
+## fog turns these into exactly the hazy far shore a real harbor has.
+func _build_mainland() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(str(params["seed"]) + "/mainland")
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(-1)
+	for arc in range(rng.randi_range(2, 4)):
+		var b0 := rng.randf_range(0.0, TAU)
+		var span := rng.randf_range(0.5, 1.3)
+		var r := rng.randf_range(5200.0, 7500.0)
+		# Overlapping segments make a CONTINUOUS shore; gaps read as rafts.
+		var step_b := 300.0 / r
+		var b := b0
+		while b < b0 + span:
+			var c := Vector2(cos(b), sin(b)) * (r + rng.randf_range(-150.0, 150.0))
+			var h := rng.randf_range(10.0, 30.0)
+			if rng.randf() < 0.1:
+				h = rng.randf_range(40.0, 110.0)   # a far town's own towers
+			# Land albedo, not concrete: dark enough to silhouette in haze.
+			st.set_color(Color(0.16, 0.165, 0.16) * rng.randf_range(0.85, 1.15))
+			_mainland_box(st, c, Vector2(rng.randf_range(500.0, 800.0),
+					rng.randf_range(400.0, 900.0)), b + PI * 0.5, h)
+			b += step_b
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var m := StandardMaterial3D.new()
+	# Flat dark land albedo. Vertex colors reach the shader through an
+	# sRGB conversion that brightened them (same lesson as the trees), and
+	# per-box variation is invisible in haze anyway.
+	m.albedo_color = Color(0.14, 0.15, 0.14)
+	m.roughness = 1.0
+	m.metallic_specular = 0.0
+	mi.material_override = m
+	add_child(mi)
+
+func _mainland_box(st: SurfaceTool, c: Vector2, size: Vector2, ang: float, h: float) -> void:
+	var u := Vector2(cos(ang), sin(ang)) * size.x * 0.5
+	var v := Vector2(-sin(ang), cos(ang)) * size.y * 0.5
+	var pts := [c - u - v, c + u - v, c + u + v, c - u + v]
+	var top := []
+	for p in pts:
+		top.append(Vector3(p.x, h, p.y))
+	for i in [0, 1, 2, 0, 2, 3]:
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(top[i])
+	for i in range(4):
+		var a: Vector3 = top[i]
+		var b: Vector3 = top[(i + 1) % 4]
+		var a0 := Vector3(a.x, -3.0, a.z)
+		var b0 := Vector3(b.x, -3.0, b.z)
+		for q in [b, a, a0, b, a0, b0]:
+			st.set_uv(Vector2.ZERO)
+			st.add_vertex(q)
+
 ## The island: a radial fan of ground following the coastline, its rim just
 ## past the esplanade, and a skirt dropping below the waterline so the city
 ## stands out of the harbor on a real edge. 2 deg steps keep the rim smooth
@@ -342,6 +401,7 @@ func _build_plan_features(plan: CityPlan) -> void:
 	wmi.material_override = water
 	wmi.position = Vector3(0.0, -1.65, 0.0)
 	add_child(wmi)
+	_build_mainland()
 	# The city meets its water on a built edge: an esplanade ring at curb
 	# height with a seawall lip, segmented around the whole coastline.
 	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)

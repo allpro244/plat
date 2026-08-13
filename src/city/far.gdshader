@@ -6,7 +6,7 @@
 shader_type spatial;
 render_mode cull_back;
 
-uniform vec3 base_mul = vec3(1.0);
+uniform vec3 base_mul = vec3(0.42, 0.42, 0.42);
 uniform float speck_energy = 0.7;
 
 varying vec2 muv;
@@ -44,10 +44,16 @@ void fragment() {
 		// Daylight fenestration: dark glass cells so a distant facade reads
 		// as a building, not an untextured slab. Fades with screen coverage
 		// like the lights, for the same anti-glitter reason.
+		float pxa = fwidth(muv.x) + 0.001;
 		if (in_win) {
-			float pxa = fwidth(muv.x) + 0.001;
 			ALBEDO *= mix(1.0, 0.42, clamp(1.9 / pxa, 0.0, 1.0));
 			ROUGHNESS = 0.4;
+		}
+		// Floor slab lines: the horizontal banding every real facade has.
+		// Without them a sunlit distant wall is one flat value — the single
+		// biggest reason the far tier read as washed plaster.
+		if (fract(muv.y / 3.3) < 0.14) {
+			ALBEDO *= mix(1.0, 0.72, clamp(1.2 / pxa, 0.0, 1.0));
 		}
 		if (h < vlit && in_win) {
 			float v = fract(h * 61.17);
