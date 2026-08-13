@@ -517,7 +517,17 @@ static func _load_texture(path: String) -> Texture2D:
 	if ResourceLoader.exists(path):
 		var res := ResourceLoader.load(path)
 		if res is Texture2D:
-			return res as Texture2D
+			var tex := res as Texture2D
+			# Godot imports images with mipmaps OFF by default, and the raw
+			# path this replaced called generate_mipmaps() by hand. Without
+			# them every facade aliases into sparkle at distance — a real
+			# regression, caught by the perceptual gate (mean 5.57 vs 3.0)
+			# rather than by anyone eyeballing a packaging change.
+			var im := tex.get_image()
+			if im != null and not im.has_mipmaps():
+				im.generate_mipmaps()
+				return ImageTexture.create_from_image(im)
+			return tex
 	if FileAccess.file_exists(path):
 		var img := Image.load_from_file(path)
 		if img != null:
