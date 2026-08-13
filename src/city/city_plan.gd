@@ -38,16 +38,20 @@ var _limit_h := []                # city-limit harmonics: [[amp, freq, phase], .
 ## footprints; win_fx shrinks windows (industrial reads near-blind).
 const DISTRICTS := {
 	"core":       {"height_mul": 1.45, "cap": 999.0, "mass_w": [16.0, 36.0], "bay": 1.9,
-			"win_fx": 0.55, "tints": [Color(0.55, 0.56, 0.60), Color(0.42, 0.44, 0.48),
+			"win_fx": 0.55, "lit": 0.30, "shop_lit": 0.45,
+			"tints": [Color(0.55, 0.56, 0.60), Color(0.42, 0.44, 0.48),
 			Color(0.70, 0.70, 0.72), Color(0.60, 0.55, 0.50)]},
 	"prewar":     {"height_mul": 1.0, "cap": 999.0, "mass_w": [14.0, 34.0], "bay": 2.6,
-			"win_fx": 0.42, "tints": [Color(0.80, 0.68, 0.58), Color(0.95, 0.85, 0.74),
+			"win_fx": 0.42, "lit": 0.42, "shop_lit": 0.50,
+			"tints": [Color(0.80, 0.68, 0.58), Color(0.95, 0.85, 0.74),
 			Color(1.0, 0.78, 0.62), Color(0.72, 0.69, 0.67)]},
 	"walkup":     {"height_mul": 0.62, "cap": 34.0, "mass_w": [12.0, 24.0], "bay": 2.4,
-			"win_fx": 0.40, "tints": [Color(0.85, 0.72, 0.60), Color(0.75, 0.62, 0.52),
+			"win_fx": 0.40, "lit": 0.50, "shop_lit": 0.30,
+			"tints": [Color(0.85, 0.72, 0.60), Color(0.75, 0.62, 0.52),
 			Color(0.90, 0.82, 0.70), Color(0.68, 0.60, 0.55)]},
 	"industrial": {"height_mul": 0.50, "cap": 26.0, "mass_w": [40.0, 85.0], "bay": 4.5,
-			"win_fx": 0.30, "tints": [Color(0.62, 0.58, 0.54), Color(0.55, 0.50, 0.46),
+			"win_fx": 0.30, "lit": 0.06, "shop_lit": 0.08,
+			"tints": [Color(0.62, 0.58, 0.54), Color(0.55, 0.50, 0.46),
 			Color(0.70, 0.66, 0.60), Color(0.58, 0.56, 0.55)]},
 }
 

@@ -48,6 +48,10 @@ func _ready() -> void:
 	_build_environment()
 	_build_sun()
 	_build_ground()
+	# Dusk factor from the sun the environment just derived: fades in below
+	# 14 deg elevation, full by 4 deg. Drives lit windows everywhere.
+	var night: float = clampf((14.0 - float(sun_info["elevation_deg"])) / 10.0, 0.0, 1.0)
+	MeshBuilder.night_factor = night
 	MeshBuilder.plain_materials = params.get("plain_mats", false)
 	MeshBuilder.skip_windows = params.get("skip_windows", false)
 	MeshBuilder.skip_props = params.get("skip_props", false)
@@ -56,7 +60,7 @@ func _ready() -> void:
 	if not params.get("no_context", false):
 		var plan := CityPlan.new(int(params["seed"]))
 		print("[plat] ", plan.describe())
-		add_child(ContextGen.build(int(params["seed"]), _matlib, plan))
+		add_child(ContextGen.build(int(params["seed"]), _matlib, plan, night))
 		_build_plan_features(plan)
 		if not params.get("skip_ground", false):
 			add_child(GroundGen.build(int(params["seed"]), plan,

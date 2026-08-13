@@ -20,6 +20,11 @@ static var skip_windows := false
 ## Diagnostic: skip roof props (cornice/parapet/bulkhead/water tower).
 static var skip_props := false
 
+## 0 = day, 1 = dusk; set by the scene before building. Drives lit windows
+## on curtain-wall surfaces (the hero 1961 tower goes to evening with the
+## city around it).
+static var night_factor := 0.0
+
 static var _roof_mat: StandardMaterial3D
 static var _wood_mat: StandardMaterial3D
 static var _steel_mat: StandardMaterial3D
@@ -125,6 +130,10 @@ static func _curtain_material(f: Dictionary) -> Material:
 	m.set_shader_parameter("glass_color", Color(0.16, 0.20, 0.22))
 	m.set_shader_parameter("glass_roughness", 0.08)
 	m.set_shader_parameter("glass_metallic", 0.55)
+	# An office slab at dusk: some floors still working, most gone home.
+	m.set_shader_parameter("lit_fraction", 0.30 * night_factor)
+	m.set_shader_parameter("shop_lit_fraction", 0.45 * night_factor)
+	m.set_shader_parameter("win_seed", f["bay_w"] * 37.7 + f["floor_h"] * 91.3)
 	return m
 
 static func _roof_material() -> StandardMaterial3D:

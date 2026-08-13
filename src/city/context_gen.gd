@@ -23,7 +23,11 @@ const NEAR_R := 850.0   # windowed-tier radius, meters (~old rings 1-4)
 
 static var _wall_tex := {}
 
-static func build(seed_value: int, matlib: Dictionary, plan: CityPlan) -> Node3D:
+static var night := 0.0   # 0 = full day, 1 = full dusk; set by the scene
+
+static func build(seed_value: int, matlib: Dictionary, plan: CityPlan,
+		night_factor: float = 0.0) -> Node3D:
+	night = night_factor
 	_wall_tex = matlib.get("brick_red", {})
 	var root := Node3D.new()
 	var far_st := _st()   # accumulates FAR tier geometry, flushed in batches
@@ -178,6 +182,11 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	mat.set_shader_parameter("window_frac_x", p["win_fx"])
 	mat.set_shader_parameter("window_frac_y", 0.5)
 	mat.set_shader_parameter("wall_roughness", 0.85)
+	# Dusk life: how much of this block is home (or still at a desk) comes
+	# from the district; whether a GIVEN window is lit is the shader's hash.
+	mat.set_shader_parameter("lit_fraction", float(p["lit"]) * night)
+	mat.set_shader_parameter("shop_lit_fraction", float(p["shop_lit"]) * night)
+	mat.set_shader_parameter("win_seed", rng.randf() * 100.0)
 	mi.set_surface_override_material(0, mat)
 	if mesh.get_surface_count() > 1:
 		mi.set_surface_override_material(1, _roof_material())
