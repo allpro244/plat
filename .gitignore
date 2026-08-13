@@ -1,0 +1,22 @@
+# Godot
+.godot/
+/android/
+export_presets.cfg
+
+# Fetched CC0 assets — pulled by tools/fetch-assets, pinned, never committed.
+# Binaries in git history are permanent; the fetch script is the source of truth.
+/assets/downloaded/
+
+# Build output and renders
+/build/
+/export/
+/renders/*.png
+!/renders/reference/*.png
+
+# Node (web build tooling)
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
