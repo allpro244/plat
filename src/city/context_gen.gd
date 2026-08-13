@@ -25,6 +25,23 @@ const NEAR_R := 3200.0  # windowed-tier radius: the WHOLE island renders full-qu
 ## frame and read as white boxes (user-reported). Stills can afford full
 ## quality everywhere; the far tier code remains for a future LOD dial.
 
+## ERAS: the master variable real streets have and parameter jitter does
+## not. A building's era dictates its floor heights, window shapes, base
+## treatment, cornice odds and roof events — so two eras differ in KIND.
+## Surface A carries victorian/tenement fabric, B carries deco/prewar,
+## C carries midcentury — so era also correlates with wall material.
+const ERAS := {
+	"victorian":  {"floor_h": 3.9, "gfh": 4.8, "bay": 2.9, "wfx": 0.32, "wfy": 0.64,
+			"cornice_p": 0.85, "mansard_p": 0.22, "wt_p": 0.3, "base_floors": 1.0,
+			"base_tint": Color(0.78, 0.72, 0.66), "base_stone": 1.0},
+	"prewar":     {"floor_h": 3.4, "gfh": 4.4, "bay": 2.35, "wfx": 0.45, "wfy": 0.5,
+			"cornice_p": 0.55, "mansard_p": 0.0, "wt_p": 0.3, "base_floors": 2.0,
+			"base_tint": Color(0.88, 0.85, 0.8), "base_stone": 1.0},
+	"midcentury": {"floor_h": 3.05, "gfh": 3.9, "bay": 3.5, "wfx": 0.62, "wfy": 0.44,
+			"cornice_p": 0.0, "mansard_p": 0.0, "wt_p": 0.08, "base_floors": 1.0,
+			"base_tint": Color(1.02, 1.02, 1.0), "base_stone": 0.0},
+}
+
 static var _wall_tex := {}
 static var _matlib := {}
 ## Per-building UV2 (style hash, texture offset), set before emitting each
@@ -222,9 +239,12 @@ static func _cornice(roof: SurfaceTool, xf: Transform3D, x: float, z: float,
 ##   - low masses stay simple.
 static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 		rng: RandomNumberGenerator, m: Array, tint: Color, xf: Transform3D,
-		tower_p: float) -> void:
+		tower_p: float, era: Dictionary = {}) -> void:
 	# The style hash IS the building's identity in the shader.
 	_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
+	# Building height rides COLOR.a (as h/400) so the shader can compose
+	# base / shaft / crown against the real top of THIS building.
+	tint.a = clampf(float(m[4]) / 400.0, 0.02, 1.0)
 	var ax: float = m[0]
 	var az: float = m[1]
 	var w: float = m[2]
@@ -345,8 +365,57 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 	else:
 		_emit_mass(st, m, tint, xf)
 		_roofscape(roof, rng, m, xf)
-		if h > 12.0 and h < 90.0 and rng.randf() < 0.45:
+		var cornice_p: float = float(era.get("cornice_p", 0.45))
+		if h > 12.0 and h < 90.0 and rng.randf() < cornice_p:
 			_cornice(roof, xf, ax, az, w, d, h, tint)
+		if rng.randf() < float(era.get("mansard_p", 0.0)) and w > 8.0:
+			# Mansard cap: the steep slate top of the victorian rowhouse.
+			roof.set_color(Color(0.12, 0.12, 0.135))
+			_taper(roof, xf, ax + 0.2, az + 0.2, w - 0.4, d - 0.4, h,
+					rng.randf_range(2.2, 3.2), minf(1.3, w * 0.12), 1.3)
+		elif rng.randf() < float(era.get("wt_p", 0.0)) and w > 12.0 and h > 18.0:
+			_water_tower(roof, rng, ax, az, w, d, h, xf)
+
+## Rooftop water tower, merged-octagon edition: the NYC roofline's
+## signature. Dark timber drum on a short plinth with a shallow cap.
+static func _water_tower(roof: SurfaceTool, rng: RandomNumberGenerator,
+		ax: float, az: float, w: float, d: float, h: float, xf: Transform3D) -> void:
+	var r := rng.randf_range(1.3, 1.9)
+	var cx := ax + rng.randf_range(r + 1.0, maxf(r + 1.1, w - r - 1.0))
+	var cz := az + rng.randf_range(r + 1.0, maxf(r + 1.1, d - r - 1.0))
+	var pts := []
+	for k in range(8):
+		var a := TAU * float(k) / 8.0
+		pts.append(Vector2(cx + cos(a) * r, cz + sin(a) * r))
+	roof.set_color(Color(0.30, 0.30, 0.31))
+	_box(roof, xf, cx - 0.8, cz - 0.8, 1.6, 1.6, h, 1.6)   # plinth / legs mass
+	roof.set_color(Color(0.17, 0.12, 0.08))                 # tarred cedar
+	_prism(roof, xf, pts, h + 1.6, rng.randf_range(3.0, 4.2))
+	roof.set_color(Color(0.10, 0.10, 0.10))
+	_taper(roof, xf, cx - r, cz - r, r * 2.0, r * 2.0, h + 1.6 + 3.6,
+			1.1, r * 0.85, r * 0.85)
+
+## Four inward-sloping quads and a cap: mansards, spires, tower caps.
+static func _taper(st: SurfaceTool, xf: Transform3D, x: float, z: float,
+		w: float, d: float, y0: float, h: float, ix: float, iz: float) -> void:
+	var b := [Vector2(x, z), Vector2(x + w, z), Vector2(x + w, z + d), Vector2(x, z + d)]
+	var t := [Vector2(x + ix, z + iz), Vector2(x + w - ix, z + iz),
+			Vector2(x + w - ix, z + d - iz), Vector2(x + ix, z + d - iz)]
+	for i in range(4):
+		var bl: Vector2 = b[(i + 1) % 4]
+		var br: Vector2 = b[i]
+		var tl: Vector2 = t[(i + 1) % 4]
+		var tr: Vector2 = t[i]
+		for q in [[Vector3(tl.x, y0 + h, tl.y), Vector2(0, h)],
+				[Vector3(tr.x, y0 + h, tr.y), Vector2(1, h)],
+				[Vector3(br.x, y0, br.y), Vector2(1, 0)],
+				[Vector3(tl.x, y0 + h, tl.y), Vector2(0, h)],
+				[Vector3(br.x, y0, br.y), Vector2(1, 0)],
+				[Vector3(bl.x, y0, bl.y), Vector2(0, 0)]]:
+			st.set_uv(q[1] as Vector2)
+			st.set_uv2(_uv2)
+			st.add_vertex(xf * (q[0] as Vector3))
+	_top(st, xf, x + ix, z + iz, w - ix * 2.0, d - iz * 2.0, y0 + h)
 
 ## The wing joins the same surface; helper exists so the call site reads.
 static func wing_st(st: SurfaceTool) -> SurfaceTool:
@@ -397,12 +466,18 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		# camera: keep them low so background never blocks subject.
 		if near_hero and float(b["z"]) > 31.0 and m[4] > 30.0:
 			m[4] = rng.randf_range(18.0, 30.0)
-		# Three facade materials per block (different wall scans where the
-		# library has them) x per-building style hashes in the shader.
-		var roll := rng.randf()
-		_emit_building(st if roll < 0.4 else (st_b if roll < 0.72 else st_c),
-				tw, roof, rng, m,
-				tints[rng.randi_range(0, tints.size() - 1)], xf, tower_p)
+		# ERA per building: the city's era bias (old port vs young metro)
+		# shifts the mix; district nudges it (walkups skew old, core new).
+		var roll: float = rng.randf() + plan.era_bias * 0.5 \
+				+ (0.25 if b["district"] == "core" else 0.0)
+		var era_name := "victorian" if roll < 0.4 else ("prewar" if roll < 0.95 else "midcentury")
+		if roll >= 1.15:
+			era_name = "midcentury"
+		var era: Dictionary = ERAS[era_name]
+		var sti: SurfaceTool = st if era_name == "victorian" \
+				else (st_b if era_name == "prewar" else st_c)
+		_emit_building(sti, tw, roof, rng, m,
+				tints[rng.randi_range(0, tints.size() - 1)], xf, tower_p, era)
 		if float(b["dist"]) < 500.0:
 			_awnings(roof, rng, m, float(b["d"]), xf)
 	# Commit only NON-EMPTY surfaces, and assign each material by the
@@ -423,18 +498,14 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		mat.set_shader_parameter("use_wall_texture", 0.0)
 	mat.set_shader_parameter("wall_tint", Color.WHITE)  # tint rides vertex COLOR
 	mat.set_shader_parameter("windows_enabled", 1.0)
-	mat.set_shader_parameter("floor_height", 3.5)
-	mat.set_shader_parameter("ground_floor_height", 4.5)
-	mat.set_shader_parameter("bay_width", p["bay"] * rng.randf_range(0.92, 1.1))
-	mat.set_shader_parameter("window_frac_x", p["win_fx"])
-	mat.set_shader_parameter("window_frac_y", 0.5)
+	_apply_era(mat, ERAS["victorian"], rng)
 	mat.set_shader_parameter("wall_roughness", 0.85)
 	mat.set_shader_parameter("lit_fraction", float(p["lit"]) * night)
 	mat.set_shader_parameter("shop_lit_fraction", float(p["shop_lit"]) * night)
 	mat.set_shader_parameter("win_seed", rng.randf() * 100.0)
 	var mats: Array = []
 	for entry in [[st, mat, true], [roof, _roof_material(), false],
-			[st_b, null, true], [st_c, null, true], [tw, null, true]]:
+			[st_b, "prewar", true], [st_c, "midcentury", true], [tw, null, true]]:
 		var stool: SurfaceTool = entry[0]
 		var arr: Array = stool.commit_to_arrays()
 		var verts = arr[Mesh.ARRAY_VERTEX]
@@ -444,16 +515,30 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		if entry[2]:
 			stool.generate_tangents()
 		stool.commit(mesh)
-		if entry[1] != null:
+		if entry[1] is String:
+			var em := _facade_material(rng, p)
+			_apply_era(em, ERAS[entry[1]], rng)
+			mats.append(em)
+		elif entry[1] != null:
 			mats.append(entry[1])
-		elif stool == tw:
-			mats.append(_tower_material(rng))
 		else:
-			mats.append(_facade_material(rng, p))
+			mats.append(_tower_material(rng))
 	mi.mesh = mesh
 	for i in range(mats.size()):
 		mi.set_surface_override_material(i, mats[i])
 	return mi
+
+## Push an era's architecture into a material: floor heights, bay rhythm,
+## window shape, base composition.
+static func _apply_era(mat: ShaderMaterial, era: Dictionary, rng: RandomNumberGenerator) -> void:
+	mat.set_shader_parameter("floor_height", float(era["floor_h"]) * rng.randf_range(0.96, 1.05))
+	mat.set_shader_parameter("ground_floor_height", float(era["gfh"]))
+	mat.set_shader_parameter("bay_width", float(era["bay"]) * rng.randf_range(0.9, 1.12))
+	mat.set_shader_parameter("window_frac_x", float(era["wfx"]) * rng.randf_range(0.92, 1.1))
+	mat.set_shader_parameter("window_frac_y", float(era["wfy"]))
+	mat.set_shader_parameter("base_floors", float(era["base_floors"]))
+	mat.set_shader_parameter("base_tint", era["base_tint"])
+	mat.set_shader_parameter("base_stone", float(era["base_stone"]))
 
 ## An independent facade material: its own wall set (when the library has
 ## more than one), floor height, bay rhythm and window proportions.

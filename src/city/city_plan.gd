@@ -94,6 +94,7 @@ const HEIGHT_MODES := {
 var family := "masonry"
 var height_mode := "highrise"
 var gap_p := 0.0          # chance of a vacant slice between masses
+var era_bias := 0.0       # <0 = old city (victorian-heavy), >0 = young city
 var tree_cover := 1.0     # scales street-tree probability city-wide
 var islets := []          # satellite islands: {center, r, h: harmonics, dom}
 var _params := {}   # district -> family-adjusted params
@@ -116,6 +117,7 @@ func _init(city_seed: int) -> void:
 	height_mode = "lowrise" if hm < 0.15 else ("midrise" if hm < 0.45 \
 			else ("highrise" if hm < 0.85 else "supertall"))
 	gap_p = rng.randf_range(0.0, 0.22)
+	era_bias = rng.randf_range(-0.35, 0.55)
 	tree_cover = rng.randf_range(0.35, 1.15)
 	_bake_params()
 	_make_domains(rng)
@@ -433,7 +435,7 @@ func describe() -> String:
 	var per_district := {}
 	for b in blocks:
 		per_district[b["district"]] = int(per_district.get(b["district"], 0)) + 1
-	return "plan seed=%d family=%s mode=%s gap=%.2f trees=%.2f islets=%d domains=%d blocks=%d blvd=%d parks=%d core=(%.0f,%.0f) %s" % [
-			seed_value, family, height_mode, gap_p, tree_cover, islets.size(),
+	return "plan seed=%d family=%s mode=%s era=%.2f gap=%.2f trees=%.2f islets=%d domains=%d blocks=%d blvd=%d parks=%d core=(%.0f,%.0f) %s" % [
+			seed_value, family, height_mode, era_bias, gap_p, tree_cover, islets.size(),
 			domains.size(), blocks.size(), boulevards.size(), parks.size(),
 			core_center.x, core_center.y, str(per_district)]

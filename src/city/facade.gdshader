@@ -45,9 +45,16 @@ uniform float win_seed = 0.0;
 // render, the only way an emissive value can honestly be chosen.
 uniform float lit_energy = 0.9;
 
+// Era-group composition (set per surface): how many stone-base floors,
+// the base's material shift, and whether the base is rusticated stone.
+uniform float base_floors = 1.0;
+uniform vec3 base_tint = vec3(1.0);
+uniform float base_stone = 0.0;
+
 varying vec2 muv;
 varying vec3 vtint;
 varying vec2 vstyle;      // UV2: x = per-building style hash, y = tex offset
+varying float vheight;    // building height in meters, from COLOR.a * 400
 varying float wallness;   // 1 on vertical faces, 0 on roofs
 
 void vertex() {
@@ -55,6 +62,7 @@ void vertex() {
 	// Per-mass tint for merged context meshes rides vertex color (defaults
 	// to white on meshes that do not set it).
 	vtint = COLOR.rgb;
+	vheight = COLOR.a * 400.0;
 	vstyle = UV2;
 	wallness = 1.0 - abs((MODEL_MATRIX * vec4(NORMAL, 0.0)).y);
 }
@@ -142,6 +150,13 @@ void fragment() {
 		vec3 g = glass_color.rgb * mix(1.0, mix(0.6, 1.5, fract(sb * 97.7)), styled);
 		g.b *= mix(1.0, mix(0.85, 1.25, fract(sb * 43.9)), styled);
 		ALBEDO = g * (0.45 + 0.55 * smoothstep(1.0, 0.7, edge));
+		// PUNCHED-REVEAL SHADING: a real window sits behind the wall plane,
+		// so its head and one jamb hold shadow. Faking that recess is most
+		// of what "depth" means at the bands' distances.
+		float dxn = (fx - (0.5 - wx * 0.5)) / max(wx, 0.001);
+		float dyn = (fy - (0.54 - wy * 0.5)) / max(wy, 0.001);
+		if (dyn > 0.74) { ALBEDO *= 0.5; }        // shadowed head
+		if (dxn < 0.16) { ALBEDO *= 0.68; }       // shadowed jamb
 		ROUGHNESS = glass_roughness;
 		METALLIC = glass_metallic;
 		METALLIC = glass_metallic;
@@ -181,6 +196,30 @@ void fragment() {
 		wall_col = mix(wall_col, vec3(dot(wall_col, vec3(0.333))) * 1.12, painted * 0.75);
 		ALBEDO = wall_col * wall_tint.rgb * vtint
 				* mix(vec3(1.0), REPAINT[ci], styled);
+		// SILL: a light projecting course under each window.
+		if (windows_enabled > 0.5 && abs(fx - 0.5) < wx * 0.55
+				&& fy > 0.54 - wy * 0.5 - 0.10 && fy < 0.54 - wy * 0.5) {
+			ALBEDO *= 1.22;
+		}
+		// TRIPARTITE COMPOSITION: base / shaft / crown, the order nearly
+		// every prewar street wall follows. Base gets its era's material
+		// shift (and rustication joints when stone); the top floor
+		// lightens as a crown zone; a dark line under the roof edge reads
+		// as the cornice's cast shadow.
+		float base_h = ground_h + (base_floors - 1.0) * floor_h;
+		if (y < base_h) {
+			ALBEDO *= base_tint;
+			if (base_stone > 0.5 && fract(y / 0.62) < 0.09) {
+				ALBEDO *= 0.8;   // rustication joint
+			}
+		}
+		if (vheight > 14.0 && styled > 0.5) {
+			if (y > vheight - 0.7) {
+				ALBEDO *= 0.45;  // under-cornice shadow line
+			} else if (y > vheight - floor_h - 0.7) {
+				ALBEDO *= 1.1;   // crown floor lightens
+			}
+		}
 		// String courses: some facades carry a lighter banding line every
 		// few floors — masonry articulation, not paint.
 		float ks = 2.0 + floor(fract(sb * 23.7) * 4.0);
