@@ -159,8 +159,12 @@ func _build_environment() -> void:
 		env.sdfgi_cascades = 4
 		env.sdfgi_bounce_feedback = 0.5
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_white = 6.0
-	env.tonemap_exposure = 1.0 if params.get("no_fog", false) else 1.25
+	# Grading for the game-clean daylight look: at exposure 1.25 every
+	# mid-grey albedo (roofs, sidewalks) tone-mapped to near-white and the
+	# whole aerial read as chalk. 0.95 puts a 0.35-albedo roof at mid-grey
+	# where it belongs and lets the value spread between materials show.
+	env.tonemap_white = 5.0
+	env.tonemap_exposure = 0.95
 	env.ssao_enabled = true
 	env.ssao_intensity = 2.0
 	var we := WorldEnvironment.new()

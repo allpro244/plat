@@ -56,6 +56,25 @@ const DISTRICTS := {
 			Color(0.70, 0.66, 0.60), Color(0.58, 0.56, 0.55)]},
 }
 
+## Contemporary tower probability per district (chance a tall mass becomes a
+## podium + glass shaft instead of masonry tiers).
+const TOWER_P := {"core": 0.75, "prewar": 0.18, "walkup": 0.0, "industrial": 0.0}
+
+## Palette FAMILIES: the whole city leans one way, so a seed reads as "the
+## brick city" or "the render city" or "the glass city" at a glance — looser
+## than the old everyone-is-Manhattan tinting. mul multiplies district tints;
+## extra tints join the district's own.
+const FAMILIES := {
+	"masonry": {"mul": Color(1.0, 0.94, 0.88), "extra": [Color(0.62, 0.42, 0.34)]},
+	"render":  {"mul": Color(1.04, 1.02, 0.98), "extra": [Color(0.93, 0.90, 0.84),
+			Color(0.88, 0.86, 0.82), Color(0.97, 0.94, 0.85)]},
+	"cool":    {"mul": Color(0.90, 0.93, 1.0), "extra": [Color(0.55, 0.60, 0.66),
+			Color(0.47, 0.52, 0.58)]},
+}
+
+var family := "masonry"
+var _params := {}   # district -> family-adjusted params
+
 func _init(city_seed: int) -> void:
 	seed_value = city_seed
 	var rng := RandomNumberGenerator.new()
@@ -68,6 +87,8 @@ func _init(city_seed: int) -> void:
 	for k in range(3):
 		_limit_h.append([rng.randf_range(0.06, 0.16), float(rng.randi_range(1, 4)),
 				rng.randf_range(0.0, TAU)])
+	family = ["masonry", "render", "cool"][rng.randi_range(0, 2)]
+	_bake_params()
 	_make_domains(rng)
 	_make_boulevards(rng)
 	_make_water(rng)
@@ -306,8 +327,25 @@ func _block(c: Vector2, ang: float, w: float, d: float, key: String,
 
 # --- queries ----------------------------------------------------------------
 
+func _bake_params() -> void:
+	var fam: Dictionary = FAMILIES[family]
+	for dname in DISTRICTS:
+		var p: Dictionary = (DISTRICTS[dname] as Dictionary).duplicate()
+		# The raw tint tables date from a hotter exposure and run to 1.0 —
+		# paint-white. Real light masonry/render sits near 0.55-0.65 albedo;
+		# 0.62 brings the whole family into that range and the aerial stops
+		# reading as chalk.
+		var tints: Array = []
+		for t in p["tints"]:
+			tints.append((t as Color) * (fam["mul"] as Color) * 0.62)
+		for t in fam["extra"]:
+			tints.append((t as Color) * 0.8)
+		p["tints"] = tints
+		p["tower_p"] = TOWER_P[dname]
+		_params[dname] = p
+
 func params_for(b: Dictionary) -> Dictionary:
-	return DISTRICTS[b["district"]]
+	return _params[b["district"]]
 
 ## Distance-from-core falloff for the skyline gradient. 0.000375/m matches
 ## the old per-ring 0.075 at the ~200 m hero-block pitch.
@@ -319,7 +357,6 @@ func describe() -> String:
 	var per_district := {}
 	for b in blocks:
 		per_district[b["district"]] = int(per_district.get(b["district"], 0)) + 1
-	return "plan seed=%d domains=%d blocks=%d boulevards=%d parks=%d water=%s core=(%.0f,%.0f) %s" % [
-			seed_value, domains.size(), blocks.size(), boulevards.size(), parks.size(),
-			"none" if water.is_empty() else "yes", core_center.x, core_center.y,
-			str(per_district)]
+	return "plan seed=%d family=%s domains=%d blocks=%d boulevards=%d parks=%d core=(%.0f,%.0f) %s" % [
+			seed_value, family, domains.size(), blocks.size(), boulevards.size(),
+			parks.size(), core_center.x, core_center.y, str(per_district)]

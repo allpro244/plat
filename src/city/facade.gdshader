@@ -63,7 +63,15 @@ void fragment() {
 		// merged context masses live in this surface, and painting them in
 		// facade colors made every aerial frame read as pale stucco.
 		// (No early return: the shading language forbids it in fragment().)
-		ALBEDO = vec3(0.115, 0.112, 0.108) * (0.7 + 0.6 * vtint.r);
+		// Roof TONE varies per mass, hashed off the mass tint: dark tar,
+		// mid grey, silver coating, warm gravel. The value spread between
+		// neighboring roofs is most of what makes an aerial read as real.
+		float rh = fract(dot(vtint, vec3(41.17, 23.31, 67.7)));
+		vec3 roof_col = rh < 0.42 ? vec3(0.055, 0.054, 0.052)
+				: rh < 0.68 ? vec3(0.14, 0.14, 0.14)
+				: rh < 0.88 ? vec3(0.34, 0.34, 0.35)
+				: vec3(0.18, 0.15, 0.12);
+		ALBEDO = roof_col;
 		ROUGHNESS = 0.95;
 		METALLIC = 0.0;
 	} else {

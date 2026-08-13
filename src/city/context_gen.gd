@@ -81,9 +81,10 @@ static func _masses(rng: RandomNumberGenerator, b: Dictionary, plan: CityPlan) -
 		elif r < 0.85:
 			h = rng.randf_range(40.0, 75.0) * falloff
 		elif r < 0.97:
-			h = rng.randf_range(75.0, 130.0) * falloff
+			h = rng.randf_range(75.0, 150.0) * falloff
 		else:
-			h = rng.randf_range(80.0, 150.0) * maxf(falloff, 0.7)  # outlier tower
+			# Outlier tower. Contemporary skylines carry 200 m+ peaks.
+			h = rng.randf_range(90.0, 230.0) * maxf(falloff, 0.7)
 		h = clampf(h, 7.0, p["cap"])
 		var d := rng.randf_range(minf(40.0, bd - 6.0), bd - 2.0)
 		var mw := w - rng.randf_range(0.5, 3.0)
@@ -144,6 +145,50 @@ static func _box(st: SurfaceTool, xf: Transform3D, x: float, z: float,
 	_wall(st, xf, Vector3(x, y, z), Vector3(x, y, z + d), h)
 	_top(st, xf, x, z, w, d, y + h)
 
+## One building from one mass. Real massing, not extruded boxes:
+##   - tall masses in tower districts become PODIUM + GLASS TOWER (the
+##     shaft goes to its own curtain-wall surface),
+##   - mid-rise masses over ~55 m step back in 2-3 tiers,
+##   - low masses stay simple.
+static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
+		rng: RandomNumberGenerator, m: Array, tint: Color, xf: Transform3D,
+		tower_p: float) -> void:
+	var ax: float = m[0]
+	var az: float = m[1]
+	var w: float = m[2]
+	var d: float = m[3]
+	var h: float = m[4]
+	if h > 75.0 and w > 18.0 and d > 18.0 and rng.randf() < tower_p:
+		# Podium (street-wall masonry) + inset curtain shaft + mech cap.
+		var ph := rng.randf_range(8.0, 18.0)
+		_emit_mass(st, [ax, az, w, d, ph], tint, xf)
+		_roofscape(roof, rng, [ax, az, w, d, ph], xf)
+		var inx := rng.randf_range(2.0, minf(5.0, w * 0.2))
+		var inz := rng.randf_range(2.0, minf(5.0, d * 0.2))
+		st.set_color(tint)  # tower tint rides vertex color too
+		tw.set_color(Color(1, 1, 1))
+		_box(tw, xf, ax + inx, az + inz, w - inx * 2.0, d - inz * 2.0, ph, h - ph)
+		var mw := (w - inx * 2.0) * rng.randf_range(0.3, 0.5)
+		var md := (d - inz * 2.0) * rng.randf_range(0.3, 0.5)
+		roof.set_color(Color(0.30, 0.30, 0.31))
+		_box(roof, xf, ax + w * 0.5 - mw * 0.5, az + d * 0.5 - md * 0.5,
+				mw, md, h, rng.randf_range(2.5, 5.0))
+	elif h > 55.0:
+		# Setback tiers: 55-70% / rest, each stepping in on every side.
+		var h1 := h * rng.randf_range(0.55, 0.7)
+		var i1 := rng.randf_range(1.5, minf(4.0, w * 0.15))
+		_emit_mass(st, [ax, az, w, d, h1], tint, xf)
+		_roofscape(roof, rng, [ax, az, w, d, h1], xf)
+		var w2 := w - i1 * 2.0
+		var d2 := d - i1 * 2.0
+		if w2 > 6.0 and d2 > 6.0:
+			var m2 := [ax + i1, az + i1, w2, d2, h]
+			_emit_mass(st, m2, tint * rng.randf_range(0.96, 1.04), xf)
+			_roofscape(roof, rng, m2, xf)
+	else:
+		_emit_mass(st, m, tint, xf)
+		_roofscape(roof, rng, m, xf)
+
 static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> MeshInstance3D:
 	var st := _st()
@@ -151,19 +196,34 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	var tints: Array = p["tints"]
 	var near_hero: bool = float(b["dist"]) < 300.0
 	var roof := _st()
+	var tw := _st()   # glass tower shafts: curtain-wall surface
+	var tower_p: float = p.get("tower_p", 0.0)
 	for m in _masses(rng, b, plan):
 		# Blocks just south of the hero sit between it and the sun-derived
 		# camera: keep them low so background never blocks subject.
 		if near_hero and float(b["z"]) > 31.0 and m[4] > 30.0:
 			m[4] = rng.randf_range(18.0, 30.0)
-		_emit_mass(st, m, tints[rng.randi_range(0, tints.size() - 1)], xf)
-		_roofscape(roof, rng, m, xf)
+		_emit_building(st, tw, roof, rng, m,
+				tints[rng.randi_range(0, tints.size() - 1)], xf, tower_p)
 	st.generate_normals()
 	st.generate_tangents()
 	roof.generate_normals()
 	var mi := MeshInstance3D.new()
 	var mesh: ArrayMesh = st.commit()
 	roof.commit(mesh)   # surface 1: roof furniture, its own material
+	# Empty-check BEFORE generate_tangents: tangents on an empty surface
+	# throw, and the first version of this lost every towerless block to
+	# that throw (whole blocks rendered as bare sidewalk aprons).
+	var tower_arr: Array = tw.commit_to_arrays()
+	# An empty surface returns NULL at ARRAY_VERTEX, not an empty array —
+	# the direct cast threw and silently dropped every towerless block.
+	var tower_verts = tower_arr[Mesh.ARRAY_VERTEX]
+	var has_towers: bool = tower_verts != null \
+			and not (tower_verts as PackedVector3Array).is_empty()
+	if has_towers:
+		tw.generate_normals()
+		tw.generate_tangents()
+		tw.commit(mesh)  # surface 2: curtain glass
 	mi.mesh = mesh
 	var mat := ShaderMaterial.new()
 	mat.shader = FACADE_SHADER
@@ -190,7 +250,35 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	mi.set_surface_override_material(0, mat)
 	if mesh.get_surface_count() > 1:
 		mi.set_surface_override_material(1, _roof_material())
+	if has_towers:
+		mi.set_surface_override_material(mesh.get_surface_count() - 1,
+				_tower_material(rng))
 	return mi
+
+## Curtain-wall material for context glass towers: near-full glazing on the
+## meter-grid shader, mullion-dark walls, floor-tall panes.
+static func _tower_material(rng: RandomNumberGenerator) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = FACADE_SHADER
+	m.set_shader_parameter("use_wall_texture", 0.0)
+	m.set_shader_parameter("wall_tint", Color(0.24, 0.26, 0.29))
+	m.set_shader_parameter("windows_enabled", 1.0)
+	m.set_shader_parameter("floor_height", 3.6)
+	m.set_shader_parameter("ground_floor_height", 3.6)
+	m.set_shader_parameter("bay_width", rng.randf_range(1.4, 2.2))
+	m.set_shader_parameter("window_frac_x", 0.86)
+	m.set_shader_parameter("window_frac_y", 0.82)
+	m.set_shader_parameter("wall_roughness", 0.4)
+	m.set_shader_parameter("wall_metallic", 0.5)
+	m.set_shader_parameter("glass_color", [Color(0.10, 0.14, 0.16),
+			Color(0.13, 0.16, 0.14), Color(0.09, 0.12, 0.18),
+			Color(0.16, 0.17, 0.18)][rng.randi_range(0, 3)])
+	m.set_shader_parameter("glass_roughness", 0.06)
+	m.set_shader_parameter("glass_metallic", 0.7)
+	m.set_shader_parameter("lit_fraction", 0.30 * night)
+	m.set_shader_parameter("shop_lit_fraction", 0.30 * night)
+	m.set_shader_parameter("win_seed", rng.randf() * 100.0)
+	return m
 
 static var _roof_mat: StandardMaterial3D
 

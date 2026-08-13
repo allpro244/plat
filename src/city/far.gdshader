@@ -29,7 +29,11 @@ void fragment() {
 		// Roofs: built-up roofing reads darker and greyer than the walls
 		// below it. From the bands, most of the frame IS roofs — leaving
 		// them wall-colored made the whole far city look like stucco.
-		ALBEDO = mix(vec3(dot(ALBEDO, vec3(0.333))), ALBEDO, 0.2) * 0.32;
+		float rh = fract(dot(vtint, vec3(41.17, 23.31, 67.7)));
+		ALBEDO = rh < 0.42 ? vec3(0.055, 0.054, 0.052)
+				: rh < 0.68 ? vec3(0.14, 0.14, 0.14)
+				: rh < 0.88 ? vec3(0.34, 0.34, 0.35)
+				: vec3(0.18, 0.15, 0.12);
 	}
 	if (wallness > 0.5) {
 		// One cell per ~bay-and-floor; the window fills the middle of it.
