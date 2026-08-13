@@ -346,15 +346,27 @@ func _build_island(top_mat: Material) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	st.set_smooth_group(-1)
-	var steps := 180
-	var center := Vector3.ZERO
+	_land_fan(st, Vector2.ZERO, func(b: float) -> float:
+		return _plan.city_limit(b) + 6.0, 180)
+	for islet in _plan.islets:
+		_land_fan(st, islet["center"] as Vector2, func(b: float) -> float:
+			return _plan.islet_limit(islet, b) + 6.0, 72)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = top_mat
+	add_child(mi)
+
+## One land mass: radial ground fan + skirt down past the waterline.
+func _land_fan(st: SurfaceTool, c: Vector2, limit_fn: Callable, steps: int) -> void:
+	var center := Vector3(c.x, 0.0, c.y)
 	for i in range(steps):
 		var b0 := TAU * float(i) / float(steps)
 		var b1 := TAU * float(i + 1) / float(steps)
-		var r0: float = _plan.city_limit(b0) + 6.0
-		var r1: float = _plan.city_limit(b1) + 6.0
-		var p0 := Vector3(cos(b0) * r0, 0.0, sin(b0) * r0)
-		var p1 := Vector3(cos(b1) * r1, 0.0, sin(b1) * r1)
+		var r0: float = limit_fn.call(b0)
+		var r1: float = limit_fn.call(b1)
+		var p0 := center + Vector3(cos(b0) * r0, 0.0, sin(b0) * r0)
+		var p1 := center + Vector3(cos(b1) * r1, 0.0, sin(b1) * r1)
 		for q in [center, p0, p1]:
 			st.set_uv(Vector2(q.x, q.z))
 			st.add_vertex(q)
@@ -365,11 +377,6 @@ func _build_island(top_mat: Material) -> void:
 		for q in [p1, p0, d0, p1, d0, d1]:
 			st.set_uv(Vector2(q.x + q.z, q.y))
 			st.add_vertex(q)
-	st.generate_normals()
-	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
-	mi.material_override = top_mat
-	add_child(mi)
 
 ## Road paint: aged white thermoplastic, not pure white — fresh paint is
 ## ~0.75 reflectance and city paint weathers well below that.
@@ -425,7 +432,7 @@ func _build_plan_features(plan: CityPlan) -> void:
 		# Piers: about a quarter of coastline segments grow one — a deck
 		# running out into the harbor, sometimes with a transit shed. The
 		# working edge a port city actually has.
-		if prng.randf() < 0.28:
+		if prng.randf() < 0.28:  # main island only; islets stay residential
 			var plen := prng.randf_range(60.0, 150.0)
 			var pw := prng.randf_range(14.0, 30.0)
 			var off := prng.randf_range(-0.3, 0.3) * seg
@@ -438,6 +445,17 @@ func _build_plan_features(plan: CityPlan) -> void:
 				shed.roughness = 0.9
 				_slab_rot(pc, Vector2(pw * 0.7, plen * prng.randf_range(0.4, 0.7)),
 						b, prng.randf_range(5.0, 9.0), shed)
+	for islet in plan.islets:
+		var isteps := 48
+		var ic: Vector2 = islet["center"]
+		for i in range(isteps):
+			var b := TAU * (float(i) + 0.5) / float(isteps)
+			var lim: float = plan.islet_limit(islet, b)
+			var seg := lim * TAU / float(isteps) + 3.0
+			var tang := b + PI * 0.5
+			var c := Vector2(cos(b), sin(b))
+			_slab_rot(ic + c * (lim - 11.0), Vector2(seg, 20.0), tang, 0.15, walk)
+			_slab_rot(ic + c * (lim - 1.0), Vector2(seg, 1.4), tang, 1.05, wall)
 
 ## A slab centered at `center` with plan-frame X size size.x / Z size size.y,
 ## turned by `angle` (the plan's rotation convention: local +X maps to world

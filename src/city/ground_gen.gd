@@ -45,7 +45,7 @@ static func build(seed_value: int, plan: CityPlan, walk_mat: Material,
 		if float(b["dist"]) < TREE_R:
 			var rng := RandomNumberGenerator.new()
 			rng.seed = hash("%d/trees/%s" % [seed_value, b["key"]])
-			if rng.randf() < float(TREE_P[b["district"]]):
+			if rng.randf() < float(TREE_P[b["district"]]) * plan.tree_cover:
 				_street_trees(trees, rng, c, Vector2(hw, hd), ang)
 	for bl in plan.boulevards:
 		_median(green, plan, bl)

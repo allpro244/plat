@@ -94,6 +94,9 @@ static func _masses(rng: RandomNumberGenerator, b: Dictionary, plan: CityPlan) -
 		var mw := w - rng.randf_range(0.5, 3.0)
 		out.append([x + (w - mw) * 0.5, -d * 0.5, mw, d, h])
 		x += w
+		# Vacant slices: some cities are gap-toothed, some solid street wall.
+		if rng.randf() < plan.gap_p:
+			x += rng.randf_range(6.0, 18.0)
 	return out
 
 static func _emit_mass(st: SurfaceTool, m: Array, tint: Color, xf: Transform3D) -> void:

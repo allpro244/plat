@@ -75,9 +75,27 @@ const FAMILIES := {
 			Color(0.88, 0.86, 0.82), Color(0.97, 0.94, 0.85)]},
 	"cool":    {"mul": Color(0.90, 0.93, 1.0), "extra": [Color(0.55, 0.60, 0.66),
 			Color(0.47, 0.52, 0.58)]},
+	"brick":   {"mul": Color(1.0, 0.82, 0.72), "extra": [Color(0.48, 0.28, 0.22),
+			Color(0.58, 0.34, 0.26)]},
+	"pastel":  {"mul": Color(1.06, 1.0, 0.92), "extra": [Color(0.85, 0.72, 0.55),
+			Color(0.82, 0.62, 0.50), Color(0.78, 0.75, 0.62)]},
+}
+
+## Skyline CULTURE: some cities are low-rise towns, some are supertall
+## metropolises. Multiplies district height params; caps clamp; tower_scale
+## scales the glass-tower probability.
+const HEIGHT_MODES := {
+	"lowrise":   {"mul": 0.45, "cap": 55.0,  "tower_scale": 0.0},
+	"midrise":   {"mul": 0.75, "cap": 110.0, "tower_scale": 0.5},
+	"highrise":  {"mul": 1.0,  "cap": 260.0, "tower_scale": 1.0},
+	"supertall": {"mul": 1.25, "cap": 420.0, "tower_scale": 1.4},
 }
 
 var family := "masonry"
+var height_mode := "highrise"
+var gap_p := 0.0          # chance of a vacant slice between masses
+var tree_cover := 1.0     # scales street-tree probability city-wide
+var islets := []          # satellite islands: {center, r, h: harmonics, dom}
 var _params := {}   # district -> family-adjusted params
 
 func _init(city_seed: int) -> void:
@@ -92,9 +110,16 @@ func _init(city_seed: int) -> void:
 	for k in range(3):
 		_limit_h.append([rng.randf_range(0.06, 0.16), float(rng.randi_range(1, 4)),
 				rng.randf_range(0.0, TAU)])
-	family = ["masonry", "render", "cool"][rng.randi_range(0, 2)]
+	family = ["masonry", "render", "cool", "brick", "pastel"][rng.randi_range(0, 4)]
+	# Weighted: most cities mid/high; the extremes are memorable minorities.
+	var hm := rng.randf()
+	height_mode = "lowrise" if hm < 0.15 else ("midrise" if hm < 0.45 \
+			else ("highrise" if hm < 0.85 else "supertall"))
+	gap_p = rng.randf_range(0.0, 0.22)
+	tree_cover = rng.randf_range(0.35, 1.15)
 	_bake_params()
 	_make_domains(rng)
+	_make_islets(rng)
 	_make_boulevards(rng)
 	_make_water(rng)
 	_make_parks(rng)
@@ -109,6 +134,8 @@ func _make_domains(rng: RandomNumberGenerator) -> void:
 	domains.append({"center": Vector2.ZERO, "angle": 0.0,
 			"bw": BLOCK_W, "bd": BLOCK_D, "rx": 18.0, "rz": 24.0,
 			"ave_every": rng.randi_range(4, 7), "ave_phase": rng.randi_range(0, 6)})
+	# Street-width culture: some cities run tight lanes, some broad ones.
+	var street_mul := rng.randf_range(0.8, 1.25)
 	# 2-4 more domains, each a differently-turned, differently-pitched grid.
 	# Their collisions with each other (and with domain 0) are where the city
 	# stops looking like one endless Manhattan.
@@ -121,11 +148,52 @@ func _make_domains(rng: RandomNumberGenerator) -> void:
 			"angle": deg_to_rad(rng.randf_range(8.0, 42.0)) * (1.0 if rng.randf() < 0.5 else -1.0),
 			"bw": rng.randf_range(110.0, 200.0),
 			"bd": rng.randf_range(55.0, 80.0),
-			"rx": rng.randf_range(15.0, 22.0),
-			"rz": rng.randf_range(18.0, 26.0),
+			"rx": rng.randf_range(15.0, 22.0) * street_mul,
+			"rz": rng.randf_range(18.0, 26.0) * street_mul,
 			"ave_every": rng.randi_range(4, 7),
 			"ave_phase": rng.randi_range(0, 6),
 		})
+
+## 0-2 satellite islets offshore, each with its own mini street grid (a
+## domain of its own, so nearest-center assignment hands it its ground).
+## An archipelago silhouette is unmistakable identity.
+func _make_islets(rng: RandomNumberGenerator) -> void:
+	for k in range(rng.randi_range(0, 2)):
+		var b := rng.randf_range(0.0, TAU)
+		var r := rng.randf_range(320.0, 650.0)
+		var center := Vector2(cos(b), sin(b)) \
+				* (city_limit(b) + r + rng.randf_range(350.0, 900.0))
+		var harm := []
+		for j in range(2):
+			harm.append([rng.randf_range(0.06, 0.18), float(rng.randi_range(1, 3)),
+					rng.randf_range(0.0, TAU)])
+		domains.append({
+			"center": center,
+			"angle": rng.randf_range(-PI * 0.25, PI * 0.25),
+			"bw": rng.randf_range(100.0, 160.0),
+			"bd": rng.randf_range(52.0, 70.0),
+			"rx": rng.randf_range(14.0, 20.0),
+			"rz": rng.randf_range(16.0, 24.0),
+			"ave_every": rng.randi_range(4, 7),
+			"ave_phase": rng.randi_range(0, 6),
+		})
+		islets.append({"center": center, "r": r, "h": harm, "dom": domains.size() - 1})
+
+func islet_limit(islet: Dictionary, bearing: float) -> float:
+	var f := 0.85
+	for h in islet["h"]:
+		f += float(h[0]) * sin(bearing * float(h[1]) + float(h[2]))
+	return float(islet["r"]) * f
+
+## Anywhere on land: the main island or any islet.
+func on_land(p: Vector2, margin: float = 0.0) -> bool:
+	if p.length() < city_limit(atan2(p.y, p.x)) - margin:
+		return true
+	for islet in islets:
+		var d: Vector2 = p - (islet["center"] as Vector2)
+		if d.length() < islet_limit(islet, atan2(d.y, d.x)) - margin:
+			return true
+	return false
 
 func _make_boulevards(rng: RandomNumberGenerator) -> void:
 	# 0-2 wide corridors cut straight across the fabric at a non-grid angle,
@@ -185,8 +253,8 @@ func _nearest_domain(p: Vector2) -> int:
 	return best
 
 func _in_water(p: Vector2) -> bool:
-	# Inside the coastline, with a margin for the esplanade ring.
-	return p.length() > city_limit(atan2(p.y, p.x)) - 55.0
+	# Inside a coastline (main or islet), with esplanade-ring margin.
+	return not on_land(p, 55.0)
 
 func _in_park(p: Vector2) -> bool:
 	for pk in parks:
@@ -223,7 +291,7 @@ func city_limit(bearing: float) -> float:
 	return CITY_R * f
 
 func _keep(p: Vector2, dom: int, half_w: float, half_d: float) -> bool:
-	if p.length() > city_limit(atan2(p.y, p.x)):
+	if not on_land(p):
 		return false
 	if _nearest_domain(p) != dom:
 		return false  # another domain's grid owns this ground
@@ -334,8 +402,11 @@ func _block(c: Vector2, ang: float, w: float, d: float, key: String,
 
 func _bake_params() -> void:
 	var fam: Dictionary = FAMILIES[family]
+	var hmode: Dictionary = HEIGHT_MODES[height_mode]
 	for dname in DISTRICTS:
 		var p: Dictionary = (DISTRICTS[dname] as Dictionary).duplicate()
+		p["height_mul"] = float(p["height_mul"]) * float(hmode["mul"])
+		p["cap"] = minf(float(p["cap"]), float(hmode["cap"]))
 		# The raw tint tables date from a hotter exposure and run to 1.0 —
 		# paint-white. Real light masonry/render sits near 0.55-0.65 albedo;
 		# 0.62 brings the whole family into that range and the aerial stops
@@ -346,7 +417,7 @@ func _bake_params() -> void:
 		for t in fam["extra"]:
 			tints.append((t as Color) * 0.8)
 		p["tints"] = tints
-		p["tower_p"] = TOWER_P[dname]
+		p["tower_p"] = float(TOWER_P[dname]) * float(hmode["tower_scale"])
 		_params[dname] = p
 
 func params_for(b: Dictionary) -> Dictionary:
@@ -362,6 +433,7 @@ func describe() -> String:
 	var per_district := {}
 	for b in blocks:
 		per_district[b["district"]] = int(per_district.get(b["district"], 0)) + 1
-	return "plan seed=%d family=%s domains=%d blocks=%d boulevards=%d parks=%d core=(%.0f,%.0f) %s" % [
-			seed_value, family, domains.size(), blocks.size(), boulevards.size(),
-			parks.size(), core_center.x, core_center.y, str(per_district)]
+	return "plan seed=%d family=%s mode=%s gap=%.2f trees=%.2f islets=%d domains=%d blocks=%d blvd=%d parks=%d core=(%.0f,%.0f) %s" % [
+			seed_value, family, height_mode, gap_p, tree_cover, islets.size(),
+			domains.size(), blocks.size(), boulevards.size(), parks.size(),
+			core_center.x, core_center.y, str(per_district)]
