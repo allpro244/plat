@@ -51,6 +51,15 @@ jobs:
             echo "render unchanged"
           else
             git commit -m "CI render for $GITHUB_SHA (primary asset profile)"
-            git pull --rebase origin "${GITHUB_REF_NAME}" || true
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+            # Untracked build products (.godot/, *.uid, render sidecars) can
+            # collide with commits that land on the branch mid-run and abort
+            # the rebase — that exact race failed run 31708198198. Clean them
+            # (everything of value is committed or uploaded by now) and retry
+            # the pull+push a few times to ride out concurrent runs.
+            git clean -fdx -e renders/ci
+            for i in 1 2 3 4; do
+              git pull --rebase origin "${GITHUB_REF_NAME}" \
+                && git push origin "HEAD:${GITHUB_REF_NAME}" && break
+              echo "push attempt $i failed, retrying"; sleep $((i * 5))
+            done
           fi
