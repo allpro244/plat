@@ -30,6 +30,7 @@ static func build(seed_value: int, plan: CityPlan, walk_mat: Material,
 		paint_mat: Material, grass_mat: Material) -> Node3D:
 	var root := Node3D.new()
 	var walks := _st()
+	var lots := _st()
 	var paint := _st()
 	var green := _st()
 	var trees := _st()
@@ -38,7 +39,16 @@ static func build(seed_value: int, plan: CityPlan, walk_mat: Material,
 		var ang: float = b["angle"]
 		var hw: float = float(b["w"]) * 0.5 + WALK_W
 		var hd: float = float(b["d"]) * 0.5 + WALK_W
-		_slab(walks, c, Vector2(hw, hd), ang, CURB_H)
+		# Perimeter WALK ring only — the old full-block apron painted every
+		# block interior sidewalk-white and the whole city read as slabs.
+		# The interior is backlot: courtyards, service yards, dark ground.
+		var u := Vector2(cos(ang), sin(ang))
+		var v := Vector2(-sin(ang), cos(ang))
+		_slab(walks, c + v * (hd - WALK_W * 0.5), Vector2(hw, WALK_W * 0.5), ang, CURB_H)
+		_slab(walks, c - v * (hd - WALK_W * 0.5), Vector2(hw, WALK_W * 0.5), ang, CURB_H)
+		_slab(walks, c + u * (hw - WALK_W * 0.5), Vector2(WALK_W * 0.5, hd - WALK_W), ang, CURB_H)
+		_slab(walks, c - u * (hw - WALK_W * 0.5), Vector2(WALK_W * 0.5, hd - WALK_W), ang, CURB_H)
+		_slab(lots, c, Vector2(hw - WALK_W, hd - WALK_W), ang, CURB_H * 0.8)
 		if float(b["dist"]) < CROSSWALK_R:
 			_crosswalks(paint, c, Vector2(hw, hd), ang)
 			_lane_line(paint, c, Vector2(hw, hd), ang, float(b["road"]))
@@ -63,12 +73,23 @@ static func build(seed_value: int, plan: CityPlan, walk_mat: Material,
 			var green_c := Color(0.075, 0.115, 0.045) * prng.randf_range(0.75, 1.35)
 			_tree(trees, Vector3(lp.x, 0.10, lp.y), prng.randf_range(3.0, 5.5),
 					prng.randf_range(6.0, 10.0), green_c)
-	for pair in [[walks, walk_mat], [paint, paint_mat], [green, grass_mat],
-			[trees, _tree_material()]]:
+	for pair in [[walks, walk_mat], [lots, _lot_material()], [paint, paint_mat],
+			[green, grass_mat], [trees, _tree_material()]]:
 		var mi := _commit(pair[0] as SurfaceTool, pair[1] as Material)
 		if mi != null:
 			root.add_child(mi)
 	return root
+
+static var _lot_mat: StandardMaterial3D
+
+## Block-interior ground: worn dark yard surface, not sidewalk concrete.
+static func _lot_material() -> StandardMaterial3D:
+	if _lot_mat == null:
+		_lot_mat = StandardMaterial3D.new()
+		_lot_mat.albedo_color = Color(0.155, 0.15, 0.145)
+		_lot_mat.roughness = 0.97
+		_lot_mat.metallic_specular = 0.0
+	return _lot_mat
 
 static var _tree_mat: StandardMaterial3D
 

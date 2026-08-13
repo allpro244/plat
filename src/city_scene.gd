@@ -68,7 +68,7 @@ func _ready() -> void:
 		_build_plan_features(_plan)
 		if not params.get("skip_ground", false):
 			add_child(GroundGen.build(int(params["seed"]), _plan,
-					_ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0),
+					_ground_material("sidewalk", Color(0.36, 0.35, 0.33), 0.8, 4.0),
 					_paint_material(), _grass_material()))
 	rig = CameraRig.new()
 	add_child(rig)
@@ -265,7 +265,7 @@ func _build_ground() -> void:
 	else:
 		_build_island(asphalt)
 	# Sidewalks: a concrete apron around the block at curb height.
-	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
+	var walk := _ground_material("sidewalk", Color(0.36, 0.35, 0.33), 0.8, 4.0)
 	var hx := BlockGen.BLOCK_HALF_X
 	var hz := BlockGen.BLOCK_HALF_Z
 	_slab(Vector2(-hx - 4.5, -hz - 4.5), Vector2(hx + 4.5, hz + 4.5), 0.12, walk)
@@ -411,7 +411,7 @@ func _build_plan_features(plan: CityPlan) -> void:
 	_build_mainland()
 	# The city meets its water on a built edge: an esplanade ring at curb
 	# height with a seawall lip, segmented around the whole coastline.
-	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
+	var walk := _ground_material("sidewalk", Color(0.36, 0.35, 0.33), 0.8, 4.0)
 	var wall := StandardMaterial3D.new()
 	wall.albedo_color = Color(0.42, 0.40, 0.37)   # weathered harbor concrete
 	wall.roughness = 0.9
@@ -542,8 +542,8 @@ func _ground_material(slot: String, fallback: Color, rough: float, coverage_m: f
 		# than a fresh scan in every real aerial photo, and city sidewalk
 		# concrete sits near 0.35 albedo, not the ~0.55 of a clean scan —
 		# undimmed, the walks blew out to white at the mid band.
-		m.albedo_color = Color(0.62, 0.62, 0.64) if slot == "asphalt" \
-				else (Color(0.72, 0.71, 0.69) if slot == "sidewalk" else Color.WHITE)
+		m.albedo_color = Color(0.55, 0.55, 0.57) if slot == "asphalt" \
+				else (Color(0.62, 0.61, 0.59) if slot == "sidewalk" else Color.WHITE)
 		m.normal_enabled = true
 		m.normal_texture = tex["normal"]
 		m.ao_enabled = true

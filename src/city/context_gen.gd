@@ -26,6 +26,7 @@ const NEAR_R := 3200.0  # windowed-tier radius: the WHOLE island renders full-qu
 ## quality everywhere; the far tier code remains for a future LOD dial.
 
 static var _wall_tex := {}
+static var _matlib := {}
 
 static var night := 0.0   # 0 = full day, 1 = full dusk; set by the scene
 
@@ -33,6 +34,7 @@ static func build(seed_value: int, matlib: Dictionary, plan: CityPlan,
 		night_factor: float = 0.0) -> Node3D:
 	night = night_factor
 	_wall_tex = matlib.get("brick_red", {})
+	_matlib = matlib
 	var root := Node3D.new()
 	var far_st := _st()   # accumulates FAR tier geometry, flushed in batches
 	var far_count := 0
@@ -166,7 +168,7 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 	var d: float = m[3]
 	var h: float = m[4]
 	if h > 75.0 and w > 18.0 and d > 18.0 and rng.randf() < tower_p:
-		# Podium (street-wall masonry) + inset curtain shaft + mech cap.
+		# Podium (street-wall masonry) + curtain shaft(s) + mech cap.
 		var ph := rng.randf_range(8.0, 18.0)
 		_emit_mass(st, [ax, az, w, d, ph], tint, xf)
 		_roofscape(roof, rng, [ax, az, w, d, ph], xf)
@@ -174,12 +176,39 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 		var inz := rng.randf_range(2.0, minf(5.0, d * 0.2))
 		st.set_color(tint)  # tower tint rides vertex color too
 		tw.set_color(Color(1, 1, 1))
-		_box(tw, xf, ax + inx, az + inz, w - inx * 2.0, d - inz * 2.0, ph, h - ph)
+		if w > 34.0 and rng.randf() < 0.3:
+			# TWIN shafts on one podium — a paired-slab skyline moment.
+			var sw := (w - inx * 3.0) * 0.5
+			_box(tw, xf, ax + inx, az + inz, sw, d - inz * 2.0, ph, h - ph)
+			_box(tw, xf, ax + inx * 2.0 + sw, az + inz, sw, d - inz * 2.0, ph,
+					(h - ph) * rng.randf_range(0.75, 1.0))
+		else:
+			_box(tw, xf, ax + inx, az + inz, w - inx * 2.0, d - inz * 2.0, ph, h - ph)
+			if rng.randf() < 0.35:
+				# Spire cap: a slender crown on the shaft.
+				var cw := (w - inx * 2.0) * rng.randf_range(0.2, 0.35)
+				_box(tw, xf, ax + w * 0.5 - cw * 0.5, az + d * 0.5 - cw * 0.5,
+						cw, cw, h, rng.randf_range(6.0, 22.0))
 		var mw := (w - inx * 2.0) * rng.randf_range(0.3, 0.5)
 		var md := (d - inz * 2.0) * rng.randf_range(0.3, 0.5)
 		roof.set_color(Color(0.30, 0.30, 0.31))
 		_box(roof, xf, ax + w * 0.5 - mw * 0.5, az + d * 0.5 - md * 0.5,
 				mw, md, h, rng.randf_range(2.5, 5.0))
+	elif h > 110.0:
+		# Ziggurat: three masonry tiers — the deco wedding-cake profile.
+		var t1 := h * rng.randf_range(0.4, 0.5)
+		var t2 := h * rng.randf_range(0.68, 0.8)
+		var i1 := rng.randf_range(2.0, minf(5.0, w * 0.14))
+		_emit_mass(st, [ax, az, w, d, t1], tint, xf)
+		_roofscape(roof, rng, [ax, az, w, d, t1], xf)
+		if w - i1 * 2.0 > 6.0:
+			_emit_mass(st, [ax + i1, az + i1 * 0.5, w - i1 * 2.0, d - i1, t2],
+					tint * rng.randf_range(0.97, 1.03), xf)
+			var i2 := i1 * 2.0
+			if w - i2 * 2.0 > 5.0:
+				var m3 := [ax + i2, az + i2 * 0.5, w - i2 * 2.0, d - i2, h]
+				_emit_mass(st, m3, tint * rng.randf_range(0.97, 1.03), xf)
+				_roofscape(roof, rng, m3, xf)
 	elif h > 55.0:
 		# Setback tiers: 55-70% / rest, each stepping in on every side.
 		var h1 := h * rng.randf_range(0.55, 0.7)
@@ -192,6 +221,17 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 			var m2 := [ax + i1, az + i1, w2, d2, h]
 			_emit_mass(st, m2, tint * rng.randf_range(0.96, 1.04), xf)
 			_roofscape(roof, rng, m2, xf)
+	elif h < 42.0 and w > 26.0 and d > 30.0 and rng.randf() < 0.4:
+		# Courtyard pair: street-wall bar + rear wing, a dark court between.
+		var fd := d * rng.randf_range(0.35, 0.45)
+		var m1 := [ax, az + d - fd, w, fd, h]
+		_emit_mass(st, m1, tint, xf)
+		_roofscape(roof, rng, m1, xf)
+		var bw := w * rng.randf_range(0.4, 0.7)
+		var m2 := [ax + rng.randf_range(0.0, w - bw), az, bw, d * 0.35,
+				h * rng.randf_range(0.7, 1.0)]
+		_emit_mass(st, m2, tint * rng.randf_range(0.94, 1.02), xf)
+		_roofscape(roof, rng, m2, xf)
 	else:
 		_emit_mass(st, m, tint, xf)
 		_roofscape(roof, rng, m, xf)
@@ -199,6 +239,7 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> MeshInstance3D:
 	var st := _st()
+	var st_b := _st()   # second facade surface: independent material params
 	var p := plan.params_for(b)
 	var tints: Array = p["tints"]
 	var near_hero: bool = float(b["dist"]) < 300.0
@@ -210,7 +251,9 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		# camera: keep them low so background never blocks subject.
 		if near_hero and float(b["z"]) > 31.0 and m[4] > 30.0:
 			m[4] = rng.randf_range(18.0, 30.0)
-		_emit_building(st, tw, roof, rng, m,
+		# Two facade vocabularies per block: neighbors stop sharing one
+		# window grammar, which was the loudest repetition up close.
+		_emit_building(st if rng.randf() < 0.55 else st_b, tw, roof, rng, m,
 				tints[rng.randi_range(0, tints.size() - 1)], xf, tower_p)
 	st.generate_normals()
 	st.generate_tangents()
@@ -218,6 +261,13 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	var mi := MeshInstance3D.new()
 	var mesh: ArrayMesh = st.commit()
 	roof.commit(mesh)   # surface 1: roof furniture, its own material
+	var b_arr: Array = st_b.commit_to_arrays()
+	var b_verts = b_arr[Mesh.ARRAY_VERTEX]
+	var has_b: bool = b_verts != null and not (b_verts as PackedVector3Array).is_empty()
+	if has_b:
+		st_b.generate_normals()
+		st_b.generate_tangents()
+		st_b.commit(mesh)
 	# Empty-check BEFORE generate_tangents: tangents on an empty surface
 	# throw, and the first version of this lost every towerless block to
 	# that throw (whole blocks rendered as bare sidewalk aprons).
@@ -257,10 +307,45 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	mi.set_surface_override_material(0, mat)
 	if mesh.get_surface_count() > 1:
 		mi.set_surface_override_material(1, _roof_material())
+	var next_idx := 2
+	if has_b:
+		mi.set_surface_override_material(next_idx, _facade_material(rng, p))
+		next_idx += 1
 	if has_towers:
-		mi.set_surface_override_material(mesh.get_surface_count() - 1,
-				_tower_material(rng))
+		mi.set_surface_override_material(next_idx, _tower_material(rng))
 	return mi
+
+## An independent facade material: its own wall set (when the library has
+## more than one), floor height, bay rhythm and window proportions.
+static func _facade_material(rng: RandomNumberGenerator, p: Dictionary) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = FACADE_SHADER
+	var keys: Array = _matlib.keys()
+	var tex: Dictionary = {}
+	if not keys.is_empty():
+		tex = _matlib[keys[rng.randi_range(0, keys.size() - 1)]]
+	if tex.has("albedo"):
+		mat.set_shader_parameter("wall_albedo", tex["albedo"])
+		mat.set_shader_parameter("wall_normal", tex["normal"])
+		mat.set_shader_parameter("wall_ao", tex["ao"])
+		mat.set_shader_parameter("use_wall_texture", 1.0)
+		if tex.has("roughness"):
+			mat.set_shader_parameter("wall_roughness_tex", tex["roughness"])
+			mat.set_shader_parameter("use_roughness_texture", 1.0)
+	else:
+		mat.set_shader_parameter("use_wall_texture", 0.0)
+	mat.set_shader_parameter("wall_tint", Color.WHITE)
+	mat.set_shader_parameter("windows_enabled", 1.0)
+	mat.set_shader_parameter("floor_height", rng.randf_range(3.1, 3.9))
+	mat.set_shader_parameter("ground_floor_height", rng.randf_range(3.9, 5.2))
+	mat.set_shader_parameter("bay_width", float(p["bay"]) * rng.randf_range(0.8, 1.25))
+	mat.set_shader_parameter("window_frac_x", float(p["win_fx"]) * rng.randf_range(0.85, 1.15))
+	mat.set_shader_parameter("window_frac_y", rng.randf_range(0.42, 0.58))
+	mat.set_shader_parameter("wall_roughness", 0.85)
+	mat.set_shader_parameter("lit_fraction", float(p["lit"]) * night)
+	mat.set_shader_parameter("shop_lit_fraction", float(p["shop_lit"]) * night)
+	mat.set_shader_parameter("win_seed", rng.randf() * 100.0)
+	return mat
 
 ## Curtain-wall material for context glass towers: near-full glazing on the
 ## meter-grid shader, mullion-dark walls, floor-tall panes.
@@ -268,15 +353,15 @@ static func _tower_material(rng: RandomNumberGenerator) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = FACADE_SHADER
 	m.set_shader_parameter("use_wall_texture", 0.0)
-	m.set_shader_parameter("wall_tint", Color(0.24, 0.26, 0.29))
+	m.set_shader_parameter("wall_tint", Color(0.16, 0.17, 0.19))
 	m.set_shader_parameter("windows_enabled", 1.0)
 	m.set_shader_parameter("floor_height", 3.6)
 	m.set_shader_parameter("ground_floor_height", 3.6)
 	m.set_shader_parameter("bay_width", rng.randf_range(1.4, 2.2))
 	m.set_shader_parameter("window_frac_x", 0.86)
 	m.set_shader_parameter("window_frac_y", 0.82)
-	m.set_shader_parameter("wall_roughness", 0.4)
-	m.set_shader_parameter("wall_metallic", 0.5)
+	m.set_shader_parameter("wall_roughness", 0.45)
+	m.set_shader_parameter("wall_metallic", 0.25)
 	m.set_shader_parameter("glass_color", [Color(0.10, 0.14, 0.16),
 			Color(0.13, 0.16, 0.14), Color(0.09, 0.12, 0.18),
 			Color(0.16, 0.17, 0.18)][rng.randi_range(0, 3)])
