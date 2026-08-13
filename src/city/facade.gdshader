@@ -35,9 +35,13 @@ uniform float glass_roughness : hint_range(0.0, 1.0) = 0.14;
 uniform float glass_metallic : hint_range(0.0, 1.0) = 0.5;
 
 varying vec2 muv;
+varying vec3 vtint;
 
 void vertex() {
 	muv = UV;
+	// Per-mass tint for merged context meshes rides vertex color (defaults
+	// to white on meshes that do not set it).
+	vtint = COLOR.rgb;
 }
 
 void fragment() {
@@ -72,7 +76,7 @@ void fragment() {
 		METALLIC = glass_metallic;
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
-		ALBEDO = wall_col * wall_tint.rgb;
+		ALBEDO = wall_col * wall_tint.rgb * vtint;
 		ROUGHNESS = mix(wall_roughness, texture(wall_roughness_tex, wuv).r, use_roughness_texture);
 		METALLIC = wall_metallic;
 		if (use_wall_texture > 0.5) {

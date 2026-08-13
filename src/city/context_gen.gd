@@ -1,115 +1,162 @@
 class_name ContextGen
-## Rough massing for the blocks surrounding the hero block, so it sits in a
-## city instead of on a table: seeded boxes with shader-windowed faces, no
-## facade depth, no props. This is explicitly BACKGROUND — the impostor tier
-## of the camera contract, one step below the hero block's geometry. Same
-## seed, same neighbors.
+## The rest of the city, tiered by distance from the hero block — the Scale
+## phase's answer to "does it run" before per-building detail gets expensive.
+##
+## Tiers (Chebyshev ring around the hero block):
+##   ring 1      NEAR — one merged mesh per block, one windowed-shader surface
+##               per mass (per-mass tint via vertex color).
+##   rings 2..4  MID  — one merged mesh + ONE windowed material per block;
+##               per-mass tint via vertex color.
+##   rings 5..R  FAR  — three blocks merged per instance, plain vertex-color
+##               material, no window shader. Impostor tier: silhouette and
+##               value only, which is all the far band can resolve.
+##
+## Heights fall off with distance from the core (a downtown gradient), with
+## rare outlier towers anywhere — the skyline shape real districts have.
+## Same seed, same city.
 
 const FACADE_SHADER := preload("res://src/city/facade.gdshader")
 
-# Ring of neighbor block origins around the hero block (which spans
-# x -90..90, z -30.5..30.5; side street 18 m north, avenue 30 m south,
-# cross streets 18 m).
-const PITCH_X := 198.0   # 180 block + 18 cross street
+const PITCH_X := 198.0   # 180 m block + 18 m cross street
+const PITCH_Z := 85.0    # 61 m block + 24 m street
+const RINGS := 12        # city extent: +-12 blocks (~2.4 x 1.0 km)
 
 static var _wall_tex := {}
 
 static func build(seed_value: int, matlib: Dictionary = {}) -> Node3D:
 	_wall_tex = matlib.get("brick_red", {})
 	var root := Node3D.new()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(str(seed_value) + "/context")
-	# Two rows of neighbor blocks north (beyond the side street) and south
-	# (across the avenue), three columns each; plus flanking blocks east/west
-	# of the hero block on the same row.
-	var origins := []
-	for i in [-1, 0, 1]:
-		origins.append(Vector2(i * PITCH_X, -79.0 - 61.0))          # north row (z -140..-79)
-		origins.append(Vector2(i * PITCH_X, 91.0))                  # south row (z 91..152)
-		origins.append(Vector2(i * PITCH_X, -79.0 - 61.0 - 79.0))   # far north row
-		origins.append(Vector2(i * PITCH_X, 91.0 + 61.0 + 30.0))    # far south row
-	origins.append(Vector2(-PITCH_X, -30.5))                        # west, same row
-	origins.append(Vector2(PITCH_X, -30.5))                         # east, same row
-
-	for o in origins:
-		_block(root, rng, o.x - 90.0, o.y)
+	var far_st := _st()   # accumulates FAR tier geometry, flushed in batches
+	var far_count := 0
+	for gy in range(-RINGS, RINGS + 1):
+		for gx in range(-RINGS, RINGS + 1):
+			var ring := maxi(absi(gx), absi(gy))
+			if ring == 0:
+				continue  # the hero block
+			# Per-block RNG: one block's rules never reshuffle another's.
+			var rng := RandomNumberGenerator.new()
+			rng.seed = hash("%d/ctx/%d/%d" % [seed_value, gx, gy])
+			var x0 := gx * PITCH_X - 90.0
+			var z0 := gy * PITCH_Z - 30.5
+			if ring == 1 or ring <= 4:
+				root.add_child(_block_windowed(rng, x0, z0, ring))
+			else:
+				_block_far(far_st, rng, x0, z0, ring)
+				far_count += 1
+				if far_count % 3 == 0:
+					root.add_child(_flush_far(far_st))
+					far_st = _st()
+	if far_count % 3 != 0:
+		root.add_child(_flush_far(far_st))
 	return root
 
-static func _block(root: Node3D, rng: RandomNumberGenerator, x0: float, z0: float) -> void:
-	# Subdivide a 180x61 block into 5-9 masses along its length, two rows deep
-	# where the masses are shallow, one where deep.
+# --- shared -----------------------------------------------------------------
+
+static func _st() -> SurfaceTool:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	st.set_smooth_group(-1)
+	return st
+
+const TINTS := [
+	Color(0.80, 0.68, 0.58), Color(0.95, 0.85, 0.74), Color(0.72, 0.69, 0.67),
+	Color(1.0, 0.78, 0.62), Color(0.88, 0.84, 0.76), Color(0.62, 0.56, 0.52),
+]
+
+## Masses for one block: [x, z, w, d, h] with the downtown height gradient.
+static func _masses(rng: RandomNumberGenerator, x0: float, z0: float, ring: int) -> Array:
+	var out := []
 	var x := x0
 	var x1 := x0 + 180.0
-	# Darker than the hero palette on purpose: untextured masses read lighter
-	# than textured ones under the same sun, and background must not outshine
-	# foreground.
-	# Tints now multiply a textured albedo (~0.5 mean), not white — the pool
-	# sits higher so context matches the hero block's value range.
-	var tint_pool := [
-		Color(0.80, 0.68, 0.58), Color(0.95, 0.85, 0.74), Color(0.72, 0.69, 0.67),
-		Color(1.0, 0.78, 0.62), Color(0.88, 0.84, 0.76), Color(0.62, 0.56, 0.52),
-	]
-	var node := Node3D.new()
-	root.add_child(node)
+	# Downtown gradient: the core carries the tall stock, the fringe settles
+	# to walk-ups — with rare outlier towers anywhere.
+	var falloff := clampf(1.25 - float(ring) * 0.09, 0.35, 1.25)
 	while x < x1 - 8.0:
 		var w := rng.randf_range(14.0, 34.0)
 		w = minf(w, x1 - x)
-		# Height distribution biased low with occasional towers, like a real
-		# midtown fringe block.
 		var h: float
 		var r := rng.randf()
 		if r < 0.55:
-			h = rng.randf_range(18.0, 40.0)
+			h = rng.randf_range(18.0, 40.0) * falloff
 		elif r < 0.85:
-			h = rng.randf_range(40.0, 75.0)
+			h = rng.randf_range(40.0, 75.0) * falloff
+		elif r < 0.97:
+			h = rng.randf_range(75.0, 130.0) * falloff
 		else:
-			h = rng.randf_range(75.0, 130.0)
-		# South of the hero block sits between it and the default camera:
-		# keep that row low so the background never blocks the subject.
-		if z0 > 60.0 and z0 < 130.0:
-			h = minf(h, 26.0)
+			h = rng.randf_range(80.0, 150.0)  # the outlier tower
+		h = maxf(h, 9.0)
 		var d := rng.randf_range(40.0, 61.0)
-		var mi := MeshInstance3D.new()
-		# Hand-built box so face UVs are METERS (u along face, v world height),
-		# which the window shader's dimensional grid requires. BoxMesh UVs are
-		# an atlas, not meters, and would scramble the windows.
 		var bw := w - rng.randf_range(0.5, 3.0)
-		var ax := x + (w - bw) * 0.5
-		var az := z0 + 30.5 - d * 0.5
-		var stm := SurfaceTool.new()
-		stm.begin(Mesh.PRIMITIVE_TRIANGLES)
-		stm.set_smooth_group(-1)
-		_wall(stm, Vector3(ax + bw, 0, az), Vector3(ax, 0, az), h)
-		_wall(stm, Vector3(ax, 0, az + d), Vector3(ax + bw, 0, az + d), h)
-		_wall(stm, Vector3(ax + bw, 0, az + d), Vector3(ax + bw, 0, az), h)
-		_wall(stm, Vector3(ax, 0, az), Vector3(ax, 0, az + d), h)
-		_top(stm, ax, az, bw, d, h)
-		stm.generate_normals()
-		stm.generate_tangents()
-		mi.mesh = stm.commit()
-		var m := ShaderMaterial.new()
-		m.shader = FACADE_SHADER
-		if _wall_tex.has("albedo"):
-			m.set_shader_parameter("wall_albedo", _wall_tex["albedo"])
-			m.set_shader_parameter("wall_normal", _wall_tex["normal"])
-			m.set_shader_parameter("wall_ao", _wall_tex["ao"])
-			m.set_shader_parameter("use_wall_texture", 1.0)
-		else:
-			m.set_shader_parameter("use_wall_texture", 0.0)
-		m.set_shader_parameter("wall_tint", tint_pool[rng.randi_range(0, tint_pool.size() - 1)])
-		m.set_shader_parameter("windows_enabled", 1.0)
-		m.set_shader_parameter("floor_height", 3.5)
-		m.set_shader_parameter("ground_floor_height", 4.5)
-		m.set_shader_parameter("bay_width", rng.randf_range(2.4, 3.2))
-		m.set_shader_parameter("window_frac_x", 0.42)
-		m.set_shader_parameter("window_frac_y", 0.5)
-		m.set_shader_parameter("wall_roughness", 0.85)
-		mi.material_override = m
-		node.add_child(mi)
+		out.append([x + (w - bw) * 0.5, z0 + 30.5 - d * 0.5, bw, d, h])
 		x += w
+	return out
+
+static func _emit_mass(st: SurfaceTool, m: Array, tint: Color) -> void:
+	var ax: float = m[0]
+	var az: float = m[1]
+	var w: float = m[2]
+	var d: float = m[3]
+	var h: float = m[4]
+	st.set_color(tint)
+	_wall(st, Vector3(ax + w, 0, az), Vector3(ax, 0, az), h)
+	_wall(st, Vector3(ax, 0, az + d), Vector3(ax + w, 0, az + d), h)
+	_wall(st, Vector3(ax + w, 0, az + d), Vector3(ax + w, 0, az), h)
+	_wall(st, Vector3(ax, 0, az), Vector3(ax, 0, az + d), h)
+	_top(st, ax, az, w, d, h)
+
+# --- tiers ------------------------------------------------------------------
+
+static func _block_windowed(rng: RandomNumberGenerator, x0: float, z0: float, ring: int) -> MeshInstance3D:
+	var st := _st()
+	for m in _masses(rng, x0, z0, ring):
+		# Ring 1 south of the hero sits between it and the sun-derived
+		# camera: keep it low so background never blocks subject.
+		if ring == 1 and z0 > 31.0 and m[4] > 30.0:
+			m[4] = rng.randf_range(18.0, 30.0)
+		_emit_mass(st, m, TINTS[rng.randi_range(0, TINTS.size() - 1)])
+	st.generate_normals()
+	st.generate_tangents()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var mat := ShaderMaterial.new()
+	mat.shader = FACADE_SHADER
+	if _wall_tex.has("albedo"):
+		mat.set_shader_parameter("wall_albedo", _wall_tex["albedo"])
+		mat.set_shader_parameter("wall_normal", _wall_tex["normal"])
+		mat.set_shader_parameter("wall_ao", _wall_tex["ao"])
+		mat.set_shader_parameter("use_wall_texture", 1.0)
+	else:
+		mat.set_shader_parameter("use_wall_texture", 0.0)
+	mat.set_shader_parameter("wall_tint", Color.WHITE)  # tint rides vertex COLOR
+	mat.set_shader_parameter("windows_enabled", 1.0)
+	mat.set_shader_parameter("floor_height", 3.5)
+	mat.set_shader_parameter("ground_floor_height", 4.5)
+	mat.set_shader_parameter("bay_width", rng.randf_range(2.4, 3.2))
+	mat.set_shader_parameter("window_frac_x", 0.42)
+	mat.set_shader_parameter("window_frac_y", 0.5)
+	mat.set_shader_parameter("wall_roughness", 0.85)
+	mi.material_override = mat
+	return mi
+
+static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, x0: float, z0: float, ring: int) -> void:
+	for m in _masses(rng, x0, z0, ring):
+		_emit_mass(st, m, TINTS[rng.randi_range(0, TINTS.size() - 1)] * 0.9)
+
+static var _far_mat: StandardMaterial3D
+
+static func _flush_far(st: SurfaceTool) -> MeshInstance3D:
+	if _far_mat == null:
+		_far_mat = StandardMaterial3D.new()
+		_far_mat.vertex_color_use_as_albedo = true
+		_far_mat.albedo_color = Color(0.5, 0.48, 0.46)  # masonry-mean base
+		_far_mat.roughness = 0.9
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = _far_mat
+	return mi
+
+# --- geometry ---------------------------------------------------------------
 
 static func _wall(st: SurfaceTool, bl: Vector3, br: Vector3, h: float) -> void:
 	var w := (br - bl).length()

@@ -128,9 +128,11 @@ func _build_environment() -> void:
 	# Distance haze: softens the HDRI horizon and gives the skyline depth.
 	env.fog_enabled = not params.get("no_fog", false)
 	env.fog_light_color = Color(0.75, 0.78, 0.82)
-	env.fog_density = 0.00009
-	env.fog_sky_affect = 0.22
-	env.fog_aerial_perspective = 0.6
+	# Extinction sized for city-scale sightlines (2-3 km at the far band):
+	# 0.00004/m keeps ~90% transmittance at 2.5 km, haze without milk.
+	env.fog_density = 0.00004
+	env.fog_sky_affect = 0.15
+	env.fog_aerial_perspective = 0.45
 	if params.get("gi", false):
 		# SDFGI: real-time GI from signed distance fields. The cost of this on
 		# software Vulkan is THE number that decides where beauty renders run.
@@ -236,7 +238,7 @@ func _build_ground() -> void:
 	# Streets: one large asphalt plane under everything. The scan tiles at
 	# ~6 m so aggregate reads as texture, not gravel, from the near band.
 	var asphalt := _ground_material("asphalt", Color(0.21, 0.21, 0.215), 0.92, 6.0)
-	_slab(Vector2(-800, -800), Vector2(800, 800), 0.0, asphalt)
+	_slab(Vector2(-2700, -2700), Vector2(2700, 2700), 0.0, asphalt)
 	# Sidewalks: a concrete apron around the block at curb height.
 	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
 	var hx := BlockGen.BLOCK_HALF_X
