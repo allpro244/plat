@@ -80,6 +80,25 @@ static func _masses(rng: RandomNumberGenerator, b: Dictionary, plan: CityPlan) -
 	var falloff: float = plan.falloff(b) * p["height_mul"]
 	var wmin: float = p["mass_w"][0]
 	var wmax: float = p["mass_w"][1]
+	# ROWHOUSE blocks: ~40% of residential fabric is parceled at the real
+	# NYC tenement grain — narrow 7-13 m lots shoulder to shoulder, sawtooth
+	# heights around a shared base. The wide-slab-only fabric was the
+	# biggest sameness in every close screenshot.
+	var dist_name: String = b["district"]
+	var rowhouse: bool = (dist_name == "prewar" or dist_name == "walkup") \
+			and rng.randf() < 0.4
+	if rowhouse:
+		var base_h := rng.randf_range(12.0, 26.0) * maxf(falloff, 0.55)
+		while x < x1 - 5.0:
+			var w := rng.randf_range(7.0, 13.0)
+			w = minf(w, x1 - x)
+			var h := clampf(base_h * rng.randf_range(0.72, 1.32), 7.0, p["cap"])
+			var d := rng.randf_range(minf(14.0, bd - 8.0), minf(24.0, bd - 4.0))
+			out.append([x + 0.25, bd * 0.5 - d - 2.0, w - 0.5, d, h])
+			x += w
+			if rng.randf() < plan.gap_p * 0.5:
+				x += rng.randf_range(4.0, 9.0)
+		return out
 	while x < x1 - 8.0:
 		var w := rng.randf_range(wmin, wmax)
 		w = minf(w, x1 - x)
@@ -94,7 +113,8 @@ static func _masses(rng: RandomNumberGenerator, b: Dictionary, plan: CityPlan) -
 		else:
 			# Outlier tower. Contemporary skylines carry 200 m+ peaks.
 			h = rng.randf_range(90.0, 230.0) * maxf(falloff, 0.7)
-		h = clampf(h, 7.0, p["cap"])
+		# Wider per-mass jitter: neighbors in the same band still differ.
+		h = clampf(h * rng.randf_range(0.78, 1.28), 7.0, p["cap"])
 		var d := rng.randf_range(minf(40.0, bd - 6.0), bd - 2.0)
 		var mw := w - rng.randf_range(0.5, 3.0)
 		out.append([x + (w - mw) * 0.5, -d * 0.5, mw, d, h])

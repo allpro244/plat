@@ -68,11 +68,16 @@ void fragment() {
 		// Roof TONE varies per mass, hashed off the mass tint: dark tar,
 		// mid grey, silver coating, warm gravel. The value spread between
 		// neighboring roofs is most of what makes an aerial read as real.
-		float rh = fract(dot(vtint, vec3(41.17, 23.31, 67.7)));
-		vec3 roof_col = rh < 0.42 ? vec3(0.055, 0.054, 0.052)
-				: rh < 0.68 ? vec3(0.14, 0.14, 0.14)
-				: rh < 0.88 ? vec3(0.34, 0.34, 0.35)
-				: vec3(0.18, 0.15, 0.12);
+		// Tone from the PER-BUILDING style hash. The first version hashed
+		// the tint — and a district only has ~6 tints, so whole districts
+		// collapsed to one or two roof tones (seen as a sea of pale roofs
+		// in a user screenshot). Weighted dark: most flat roofs are tar.
+		float rh = fract((vstyle.x + dot(vtint, vec3(0.31, 0.27, 0.23))) * 41.17);
+		vec3 roof_col = rh < 0.45 ? vec3(0.05, 0.049, 0.048)
+				: rh < 0.68 ? vec3(0.115, 0.115, 0.115)
+				: rh < 0.78 ? vec3(0.30, 0.30, 0.31)
+				: rh < 0.9 ? vec3(0.16, 0.13, 0.10)
+				: vec3(0.14, 0.10, 0.09);
 		ALBEDO = roof_col;
 		ROUGHNESS = 0.95;
 		METALLIC = 0.0;
@@ -162,16 +167,20 @@ void fragment() {
 		}
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
-		// PER-BUILDING COLOR: a real street swings from whitewashed paint
-		// to near-black brownstone. Value spread of ~2.5x plus a warm or
-		// cool lean, and occasional painted-over (texture flattened).
-		float val = mix(1.0, mix(0.52, 1.4, fract(sb * 5.71)), styled);
-		float lean = fract(sb * 17.3);
-		vec3 hue = mix(vec3(1.06, 0.98, 0.90), vec3(0.92, 0.97, 1.08),
-				smoothstep(0.3, 0.7, lean));
-		float painted = step(0.82, fract(sb * 11.9)) * styled;
-		wall_col = mix(wall_col, vec3(dot(wall_col, vec3(0.333))) * 1.15, painted * 0.7);
-		ALBEDO = wall_col * wall_tint.rgb * vtint * val * mix(vec3(1.0), hue, styled);
+		// PER-BUILDING COLOR as a DISCRETE palette — the way real streets
+		// vary: whitewash, cream, tan, natural, red repaint, warm grey,
+		// brownstone-dark, olive. Discrete steps read as different
+		// BUILDINGS; the old continuous multipliers read as one facade
+		// under uneven light (user screenshot).
+		const vec3 REPAINT[8] = {vec3(1.42, 1.40, 1.34), vec3(1.22, 1.12, 0.96),
+				vec3(1.02, 0.92, 0.78), vec3(1.0, 1.0, 1.0),
+				vec3(0.78, 0.56, 0.46), vec3(0.78, 0.77, 0.75),
+				vec3(0.48, 0.40, 0.36), vec3(0.82, 0.80, 0.62)};
+		int ci = int(floor(fract(sb * 5.71) * 8.0));
+		float painted = step(0.78, fract(sb * 11.9)) * styled;
+		wall_col = mix(wall_col, vec3(dot(wall_col, vec3(0.333))) * 1.12, painted * 0.75);
+		ALBEDO = wall_col * wall_tint.rgb * vtint
+				* mix(vec3(1.0), REPAINT[ci], styled);
 		// String courses: some facades carry a lighter banding line every
 		// few floors — masonry articulation, not paint.
 		float ks = 2.0 + floor(fract(sb * 23.7) * 4.0);
