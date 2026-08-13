@@ -98,9 +98,8 @@ func _build_environment() -> void:
 		return
 	var hdri_path := ASSET_DIR + "/sky/sky.hdr"
 	var baked := {}
-	var img: Image = null
-	if FileAccess.file_exists(hdri_path):
-		img = Image.load_from_file(hdri_path)
+	var img: Image = _load_image(hdri_path)
+	if img != null:
 		baked = _measure_hdri_sun(img)
 	if params["time"] == null:
 		params["time"] = _solve_time_for_elevation(
@@ -507,11 +506,43 @@ func _build_block() -> void:
 		counts[lot["era"]] = counts.get(lot["era"], 0) + 1
 	print("[plat] block: ", counts, " (", lots.size(), " buildings, seed ", params["seed"], ")")
 
+## Assets have TWO homes: raw files on disk in the dev sandbox (fetched by
+## tools/fetch-assets.sh, loadable only by absolute path) and imported
+## resources inside the PCK of an exported build (loadable only through
+## ResourceLoader). A packaged build that reads raw paths finds nothing —
+## proven by running the first export, which came up with no materials and
+## a flat fallback sky. These two helpers try the resource path first and
+## fall back to the raw file, so one code path serves both.
+static func _load_texture(path: String) -> Texture2D:
+	if ResourceLoader.exists(path):
+		var res := ResourceLoader.load(path)
+		if res is Texture2D:
+			return res as Texture2D
+	if FileAccess.file_exists(path):
+		var img := Image.load_from_file(path)
+		if img != null:
+			img.generate_mipmaps()
+			return ImageTexture.create_from_image(img)
+	return null
+
+static func _load_image(path: String) -> Image:
+	if ResourceLoader.exists(path):
+		var res := ResourceLoader.load(path)
+		if res is Texture2D:
+			return (res as Texture2D).get_image()
+		if res is Image:
+			return res as Image
+	if FileAccess.file_exists(path):
+		return Image.load_from_file(path)
+	return null
+
 ## Load every fetched material set: materials/<slot>/{albedo,normal,ao[,roughness]}.
 ## A slot missing its core maps is dropped (callers fall back per-slot).
 func _load_material_library() -> Dictionary:
 	var lib := {}
-	var root_dir := DirAccess.open(ProjectSettings.globalize_path(ASSET_DIR + "/materials"))
+	# res:// works in the editor AND inside an exported PCK; the globalized
+	# path only works in the sandbox.
+	var root_dir := DirAccess.open(ASSET_DIR + "/materials")
 	if root_dir == null:
 		push_warning("no material library — run tools/fetch-assets.sh")
 		return lib
@@ -519,10 +550,9 @@ func _load_material_library() -> Dictionary:
 		var out := {}
 		for key in ["albedo", "normal", "ao", "roughness"]:
 			var path: String = ASSET_DIR + "/materials/" + slot + "/" + key + ".jpg"
-			if FileAccess.file_exists(path):
-				var img := Image.load_from_file(path)
-				img.generate_mipmaps()
-				out[key] = ImageTexture.create_from_image(img)
+			var tex := _load_texture(path)
+			if tex != null:
+				out[key] = tex
 		if out.has("albedo") and out.has("normal") and out.has("ao"):
 			lib[slot] = out
 	if lib.is_empty():
