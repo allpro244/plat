@@ -68,7 +68,9 @@ static func _setback1916(lot: Dictionary, rng: RandomNumberGenerator) -> Diction
 	var total_h := rng.randf_range(95.0, 125.0) if big else rng.randf_range(55.0, 78.0)
 	var rect := _lot_rect(lot, lot["z1"] - lot["z0"])
 	var b := _base_building(lot, "masonry", rng)
-	# Buff masonry range for the deco stock — the era rarely reads as red brick.
+	# Deco stock: rendered stone/limestone surfaces in the buff range — the
+	# era rarely reads as red brick.
+	b["facade"]["mat"] = "stone_deco"
 	b["facade"]["tint"] = [Color(1.08, 1.02, 0.90), Color(0.95, 0.90, 0.84),
 			Color(1.0, 0.94, 0.85)][rng.randi_range(0, 2)]
 
@@ -148,13 +150,25 @@ static func _base_building(lot: Dictionary, kind: String, rng: RandomNumberGener
 		facade = {
 			"kind": "curtain",
 			"tint": Color(0.16, 0.17, 0.18),
+			"mat": "",
+			# International Style vision glass: blue-green, tight and specular.
+			"glass": Color(0.10, 0.15, 0.16), "glass_rough": 0.06,
 			"bay_w": 1.65, "floor_h": CURTAIN_FLOOR_H, "ground_h": CURTAIN_FLOOR_H * 1.4,
 			"win_fx": 0.93, "win_fy": 0.74,
 		}
 	else:
+		# Material set per building: which scan a building wears is as much a
+		# variety axis as its tint. Slots resolve against the fetched library
+		# (all of them map to the one brick set on the mirror profile).
+		var mat_slot: String = ["brick_red", "brick_mixed", "brick_old"][rng.randi_range(0, 2)]
 		facade = {
 			"kind": "masonry",
 			"tint": MASONRY_TINTS[rng.randi_range(0, MASONRY_TINTS.size() - 1)],
+			"mat": mat_slot,
+			# Pre-war single glazing reads dark and slightly green, with
+			# per-building variation from age and dirt.
+			"glass": Color(0.03, 0.045, 0.05) * rng.randf_range(0.7, 1.5),
+			"glass_rough": rng.randf_range(0.06, 0.16),
 			"bay_w": rng.randf_range(2.3, 2.9), "floor_h": MASONRY_FLOOR_H,
 			"ground_h": GROUND_FLOOR_H,
 			"win_fx": rng.randf_range(0.38, 0.46), "win_fy": 0.52,

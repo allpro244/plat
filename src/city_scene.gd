@@ -16,6 +16,7 @@ var params: Dictionary
 var rig: CameraRig
 var sun_info: Dictionary
 var sky_sun_delta_deg := 0.0
+var _matlib := {}
 
 static func defaults() -> Dictionary:
 	return {
@@ -34,7 +35,7 @@ static func defaults() -> Dictionary:
 		# caster — learned by chasing "broken" shadows that were merely
 		# pointed away from the lens.
 		"band": "near", "cam_azimuth": 130.0, "cam_height": 120.0, "cam_radius": 195.0,
-		"gi": false,
+		"gi": true,
 	}
 
 func _init(p: Dictionary = {}) -> void:
@@ -42,6 +43,7 @@ func _init(p: Dictionary = {}) -> void:
 	params.merge(p, true)
 
 func _ready() -> void:
+	_matlib = _load_material_library()
 	_build_environment()
 	_build_sun()
 	_build_ground()
@@ -51,7 +53,7 @@ func _ready() -> void:
 	if not params.get("no_block", false):
 		_build_block()
 	if not params.get("no_context", false):
-		add_child(ContextGen.build(int(params["seed"])))
+		add_child(ContextGen.build(int(params["seed"]), _matlib))
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.set_band(params["band"])
@@ -117,7 +119,9 @@ func _build_environment() -> void:
 	# neutral daylight tone at ~1/5 of direct sun, the real clear-sky ratio.
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.58, 0.62, 0.70)
-	env.ambient_light_energy = 0.5
+	# With SDFGI on, real bounce replaces most of the flat ambient term; the
+	# residual covers what four cascades cannot resolve.
+	env.ambient_light_energy = 0.30 if params.get("gi", false) else 0.5
 	# Distance haze: softens the HDRI horizon and gives the skyline depth.
 	env.fog_enabled = not params.get("no_fog", false)
 	env.fog_light_color = Color(0.75, 0.78, 0.82)
@@ -136,7 +140,7 @@ func _build_environment() -> void:
 		env.sdfgi_bounce_feedback = 0.5
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 6.0
-	env.tonemap_exposure = 1.0 if params.get("no_fog", false) else 1.12
+	env.tonemap_exposure = 1.0 if params.get("no_fog", false) else 1.25
 	env.ssao_enabled = true
 	env.ssao_intensity = 2.0
 	var we := WorldEnvironment.new()
@@ -223,15 +227,12 @@ func _build_sun() -> void:
 	light.shadow_bias = 0.05
 
 func _build_ground() -> void:
-	# Streets: one large asphalt plane under everything.
-	var asphalt := StandardMaterial3D.new()
-	asphalt.albedo_color = Color(0.21, 0.21, 0.215)
-	asphalt.roughness = 0.92
+	# Streets: one large asphalt plane under everything. The scan tiles at
+	# ~6 m so aggregate reads as texture, not gravel, from the near band.
+	var asphalt := _ground_material("asphalt", Color(0.21, 0.21, 0.215), 0.92, 6.0)
 	_slab(Vector2(-800, -800), Vector2(800, 800), 0.0, asphalt)
 	# Sidewalks: a concrete apron around the block at curb height.
-	var walk := StandardMaterial3D.new()
-	walk.albedo_color = Color(0.44, 0.43, 0.41)
-	walk.roughness = 0.8
+	var walk := _ground_material("sidewalk", Color(0.44, 0.43, 0.41), 0.8, 4.0)
 	var hx := BlockGen.BLOCK_HALF_X
 	var hz := BlockGen.BLOCK_HALF_Z
 	_slab(Vector2(-hx - 4.5, -hz - 4.5), Vector2(hx + 4.5, hz + 4.5), 0.12, walk)
@@ -262,7 +263,7 @@ func _build_block() -> void:
 			if l["id"] == only:
 				filtered.append(l)
 		lots = filtered
-	var textures := _load_wall_textures()
+	var textures := _matlib
 	var counts := {}
 	for lot in lots:
 		# Give each building its own RNG derived from the block seed and lot
@@ -279,23 +280,48 @@ func _build_block() -> void:
 		counts[lot["era"]] = counts.get(lot["era"], 0) + 1
 	print("[plat] block: ", counts, " (", lots.size(), " buildings, seed ", params["seed"], ")")
 
-func _load_wall_textures() -> Dictionary:
-	var dir := ASSET_DIR + "/brick"
-	var out := {}
-	var names := {"albedo": "albedo.jpg", "normal": "normal.jpg", "ao": "ao.jpg",
-			"roughness": "roughness.jpg"}
-	for key in names:
-		var path: String = dir + "/" + names[key]
-		if FileAccess.file_exists(path):
-			var img := Image.load_from_file(path)
-			img.generate_mipmaps()
-			out[key] = ImageTexture.create_from_image(img)
-	# roughness.jpg only exists in the primary profile; the mirror set uses a
-	# scalar (matte brick). Only the three core maps are required.
-	if not (out.has("albedo") and out.has("normal") and out.has("ao")):
-		push_warning("brick PBR set incomplete — run tools/fetch-assets.sh")
-		return {}
-	return out
+## Load every fetched material set: materials/<slot>/{albedo,normal,ao[,roughness]}.
+## A slot missing its core maps is dropped (callers fall back per-slot).
+func _load_material_library() -> Dictionary:
+	var lib := {}
+	var root_dir := DirAccess.open(ProjectSettings.globalize_path(ASSET_DIR + "/materials"))
+	if root_dir == null:
+		push_warning("no material library — run tools/fetch-assets.sh")
+		return lib
+	for slot in root_dir.get_directories():
+		var out := {}
+		for key in ["albedo", "normal", "ao", "roughness"]:
+			var path: String = ASSET_DIR + "/materials/" + slot + "/" + key + ".jpg"
+			if FileAccess.file_exists(path):
+				var img := Image.load_from_file(path)
+				img.generate_mipmaps()
+				out[key] = ImageTexture.create_from_image(img)
+		if out.has("albedo") and out.has("normal") and out.has("ao"):
+			lib[slot] = out
+	if lib.is_empty():
+		push_warning("material library empty — run tools/fetch-assets.sh")
+	return lib
+
+## Ground material: scan-textured when the slot exists (triplanar, world
+## scale, so BoxMesh slabs need no UVs), flat color otherwise.
+func _ground_material(slot: String, fallback: Color, rough: float, coverage_m: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	var tex: Dictionary = _matlib.get(slot, {})
+	if tex.has("albedo"):
+		m.albedo_texture = tex["albedo"]
+		m.normal_enabled = true
+		m.normal_texture = tex["normal"]
+		m.ao_enabled = true
+		m.ao_texture = tex["ao"]
+		if tex.has("roughness"):
+			m.roughness_texture = tex["roughness"]
+		m.uv1_triplanar = true
+		m.uv1_scale = Vector3.ONE / coverage_m
+		m.roughness = 1.0 if tex.has("roughness") else rough
+	else:
+		m.albedo_color = fallback
+		m.roughness = rough
+	return m
 
 func describe() -> String:
 	return "seed=%s date=%04d-%02d-%02d time=%05.2f sun_az=%.1f sun_el=%.1f sky_delta=%.1f %s" % [

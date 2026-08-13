@@ -63,7 +63,7 @@ func _parse_args() -> Dictionary:
 			"out":
 				p["out"] = val
 			"gi":
-				p["gi"] = val == "on"
+				p["gi"] = val != "off"
 			"context":
 				p["no_context"] = val == "off"
 			"env":

@@ -12,7 +12,10 @@ const FACADE_SHADER := preload("res://src/city/facade.gdshader")
 # cross streets 18 m).
 const PITCH_X := 198.0   # 180 block + 18 cross street
 
-static func build(seed_value: int) -> Node3D:
+static var _wall_tex := {}
+
+static func build(seed_value: int, matlib: Dictionary = {}) -> Node3D:
+	_wall_tex = matlib.get("brick_red", {})
 	var root := Node3D.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(str(seed_value) + "/context")
@@ -43,9 +46,11 @@ static func _block(root: Node3D, rng: RandomNumberGenerator, x0: float, z0: floa
 	# Darker than the hero palette on purpose: untextured masses read lighter
 	# than textured ones under the same sun, and background must not outshine
 	# foreground.
+	# Tints now multiply a textured albedo (~0.5 mean), not white — the pool
+	# sits higher so context matches the hero block's value range.
 	var tint_pool := [
-		Color(0.45, 0.37, 0.31), Color(0.55, 0.48, 0.41), Color(0.40, 0.38, 0.37),
-		Color(0.58, 0.44, 0.35), Color(0.50, 0.47, 0.42), Color(0.35, 0.31, 0.29),
+		Color(0.80, 0.68, 0.58), Color(0.95, 0.85, 0.74), Color(0.72, 0.69, 0.67),
+		Color(1.0, 0.78, 0.62), Color(0.88, 0.84, 0.76), Color(0.62, 0.56, 0.52),
 	]
 	var node := Node3D.new()
 	root.add_child(node)
@@ -87,7 +92,13 @@ static func _block(root: Node3D, rng: RandomNumberGenerator, x0: float, z0: floa
 		mi.mesh = stm.commit()
 		var m := ShaderMaterial.new()
 		m.shader = FACADE_SHADER
-		m.set_shader_parameter("use_wall_texture", 0.0)
+		if _wall_tex.has("albedo"):
+			m.set_shader_parameter("wall_albedo", _wall_tex["albedo"])
+			m.set_shader_parameter("wall_normal", _wall_tex["normal"])
+			m.set_shader_parameter("wall_ao", _wall_tex["ao"])
+			m.set_shader_parameter("use_wall_texture", 1.0)
+		else:
+			m.set_shader_parameter("use_wall_texture", 0.0)
 		m.set_shader_parameter("wall_tint", tint_pool[rng.randi_range(0, tint_pool.size() - 1)])
 		m.set_shader_parameter("windows_enabled", 1.0)
 		m.set_shader_parameter("floor_height", 3.5)

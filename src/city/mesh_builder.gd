@@ -54,7 +54,7 @@ static func building_node(b: Dictionary, wall_textures: Dictionary) -> Node3D:
 
 	var mesh := ArrayMesh.new()
 	_commit(mesh, st_wall, _wall_material(f, wall_textures))
-	_commit(mesh, st_glass, _glass_material())
+	_commit(mesh, st_glass, _glass_material(f))
 	_commit(mesh, st_curtain, _curtain_material(f))
 	_commit(mesh, st_roof, _roof_material())
 	var mi := MeshInstance3D.new()
@@ -64,12 +64,15 @@ static func building_node(b: Dictionary, wall_textures: Dictionary) -> Node3D:
 
 # --- materials -------------------------------------------------------------
 
-static func _wall_material(f: Dictionary, tex: Dictionary) -> Material:
+static func _wall_material(f: Dictionary, texlib: Dictionary) -> Material:
 	if plain_materials:
 		var pm := StandardMaterial3D.new()
 		pm.albedo_color = f["tint"]
 		pm.roughness = 0.87
 		return pm
+	# Resolve the building's material slot against the fetched library, with
+	# brick_red as the universal fallback (the mirror profile's only scan).
+	var tex: Dictionary = texlib.get(f.get("mat", ""), texlib.get("brick_red", {}))
 	var m := ShaderMaterial.new()
 	m.shader = FACADE_SHADER
 	if tex.has("albedo"):
@@ -89,16 +92,16 @@ static func _wall_material(f: Dictionary, tex: Dictionary) -> Material:
 	m.set_shader_parameter("wall_roughness", 0.87)
 	return m
 
-static func _glass_material() -> StandardMaterial3D:
-	if _glass_mat == null:
-		_glass_mat = StandardMaterial3D.new()
-		# Unlit interior behind single glazing reads near-black with a hard
-		# sky reflection. Lit-window variation waits for the occupancy feed —
-		# painting it on now would be a fake frame.
-		_glass_mat.albedo_color = Color(0.03, 0.045, 0.055)
-		_glass_mat.roughness = 0.08
-		_glass_mat.metallic = 0.85
-	return _glass_mat
+static func _glass_material(f: Dictionary) -> StandardMaterial3D:
+	# Unlit interior behind glazing reads near-black with a hard sky
+	# reflection; tint and roughness vary per building by era rule (set in
+	# the grammar). Lit-window variation waits for the occupancy feed —
+	# painting it on now would be a fake frame.
+	var m := StandardMaterial3D.new()
+	m.albedo_color = f.get("glass", Color(0.03, 0.045, 0.055))
+	m.roughness = f.get("glass_rough", 0.08)
+	m.metallic = 0.85
+	return m
 
 static func _curtain_material(f: Dictionary) -> Material:
 	if plain_materials:
