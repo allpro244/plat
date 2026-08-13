@@ -409,6 +409,11 @@ func _build_plan_features(plan: CityPlan) -> void:
 	wall.albedo_color = Color(0.42, 0.40, 0.37)   # weathered harbor concrete
 	wall.roughness = 0.9
 	var steps := 120
+	var prng := RandomNumberGenerator.new()
+	prng.seed = hash(str(params["seed"]) + "/piers")
+	var deck := StandardMaterial3D.new()
+	deck.albedo_color = Color(0.16, 0.14, 0.12)   # tarred timber deck
+	deck.roughness = 0.95
 	for i in range(steps):
 		var b := TAU * (float(i) + 0.5) / float(steps)
 		var lim := plan.city_limit(b)
@@ -417,6 +422,22 @@ func _build_plan_features(plan: CityPlan) -> void:
 		var c := Vector2(cos(b), sin(b))
 		_slab_rot(c * (lim - 14.0), Vector2(seg, 26.0), tang, 0.15, walk)
 		_slab_rot(c * (lim - 1.0), Vector2(seg, 1.6), tang, 1.05, wall)
+		# Piers: about a quarter of coastline segments grow one — a deck
+		# running out into the harbor, sometimes with a transit shed. The
+		# working edge a port city actually has.
+		if prng.randf() < 0.28:
+			var plen := prng.randf_range(60.0, 150.0)
+			var pw := prng.randf_range(14.0, 30.0)
+			var off := prng.randf_range(-0.3, 0.3) * seg
+			var pc: Vector2 = c * (lim + plen * 0.5 - 4.0) \
+					+ Vector2(cos(tang), sin(tang)) * off
+			_slab_rot(pc, Vector2(pw, plen), b, 0.5, deck)
+			if prng.randf() < 0.5:
+				var shed := StandardMaterial3D.new()
+				shed.albedo_color = Color(0.30, 0.28, 0.26) * prng.randf_range(0.8, 1.2)
+				shed.roughness = 0.9
+				_slab_rot(pc, Vector2(pw * 0.7, plen * prng.randf_range(0.4, 0.7)),
+						b, prng.randf_range(5.0, 9.0), shed)
 
 ## A slab centered at `center` with plan-frame X size size.x / Z size size.y,
 ## turned by `angle` (the plan's rotation convention: local +X maps to world

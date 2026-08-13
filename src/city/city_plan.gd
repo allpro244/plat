@@ -18,7 +18,12 @@ class_name CityPlan
 ## aligned grid with the contract street widths, and boulevards, water and
 ## parks are all kept out of the hero's neighborhood.
 
-const RINGS := 12          # hero-domain grid half-extent, in blocks
+const RINGS := 12          # hero-domain CONTRACT half-extent, in blocks
+## Hero-domain lattice half-extent. The contract grid only spans ~1 km of
+## rows; domain 0's Voronoi territory can reach the coast 2.5 km out, and
+## everything past the lattice was silently bare (seen as a flat wedge at
+## the island's north tip). 31 rows x 85 m pitch covers CITY_R.
+const EXT := 31
 const BLOCK_W := 180.0     # hero-domain block size (the contract block)
 const BLOCK_D := 61.0
 const CITY_R := 2600.0     # world radius the plan populates, meters
@@ -237,26 +242,26 @@ func _hero_positions() -> Dictionary:
 	var row_z0 := {0: -BLOCK_D * 0.5}
 	var wx := {}
 	var wz := {}
-	for i in range(-RINGS, RINGS + 2):
+	for i in range(-EXT, EXT + 2):
 		wx[i] = 36.0 if posmod(i + int(d["ave_phase"]), int(d["ave_every"])) == 0 else float(d["rx"])
 		wz[i] = float(d["rz"])
 	wz[0] = 18.0   # hero north side street (contract)
 	wz[1] = 30.0   # hero south avenue (contract)
-	for gx in range(1, RINGS + 1):
+	for gx in range(1, EXT + 1):
 		col_x0[gx] = col_x0[gx - 1] + BLOCK_W + wx[gx]
-	for gx in range(-1, -RINGS - 1, -1):
+	for gx in range(-1, -EXT - 1, -1):
 		col_x0[gx] = col_x0[gx + 1] - wx[gx + 1] - BLOCK_W
-	for gy in range(1, RINGS + 1):
+	for gy in range(1, EXT + 1):
 		row_z0[gy] = row_z0[gy - 1] + BLOCK_D + wz[gy]
-	for gy in range(-1, -RINGS - 1, -1):
+	for gy in range(-1, -EXT - 1, -1):
 		row_z0[gy] = row_z0[gy + 1] - wz[gy + 1] - BLOCK_D
 	return {"col_x0": col_x0, "row_z0": row_z0, "wz": wz}
 
 func _make_blocks() -> void:
 	# Domain 0: the hero grid, axis-aligned, contract widths.
 	var pos := _hero_positions()
-	for gy in range(-RINGS, RINGS + 1):
-		for gx in range(-RINGS, RINGS + 1):
+	for gy in range(-EXT, EXT + 1):
+		for gx in range(-EXT, EXT + 1):
 			if gx == 0 and gy == 0:
 				continue  # the hero block itself is BlockGen's
 			var c := Vector2(float(pos["col_x0"][gx]) + BLOCK_W * 0.5,

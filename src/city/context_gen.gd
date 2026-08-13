@@ -303,6 +303,17 @@ static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, b: Dictionar
 		var t: Color = (tints[rng.randi_range(0, tints.size() - 1)] as Color) * 0.9
 		t.a = lit
 		_emit_mass(st, m, t, xf)
+		# Roof clutter, far edition: 1-2 bulkhead boxes on any big roof.
+		# Near-tier roofs got furniture long ago; bare far planes were the
+		# loudest remaining flatness at altitude.
+		if m[2] * m[3] > 260.0:
+			for k in range(rng.randi_range(1, 2)):
+				var bw: float = rng.randf_range(3.0, 8.0)
+				var bd: float = rng.randf_range(3.0, 7.0)
+				st.set_color(Color(0.10, 0.10, 0.10, 0.0))
+				_box(st, xf, m[0] + rng.randf_range(1.0, maxf(1.1, m[2] - bw - 1.0)),
+						m[1] + rng.randf_range(1.0, maxf(1.1, m[3] - bd - 1.0)),
+						bw, bd, m[4], rng.randf_range(1.5, 4.0))
 
 static var _far_mat: ShaderMaterial
 
