@@ -27,6 +27,9 @@ const NEAR_R := 3200.0  # windowed-tier radius: the WHOLE island renders full-qu
 
 static var _wall_tex := {}
 static var _matlib := {}
+## Per-building UV2 (style hash, texture offset), set before emitting each
+## building; every _wall/_top vertex carries it.
+static var _uv2 := Vector2.ZERO
 
 static var night := 0.0   # 0 = full day, 1 = full dusk; set by the scene
 
@@ -162,6 +165,8 @@ static func _box(st: SurfaceTool, xf: Transform3D, x: float, z: float,
 static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 		rng: RandomNumberGenerator, m: Array, tint: Color, xf: Transform3D,
 		tower_p: float) -> void:
+	# The style hash IS the building's identity in the shader.
+	_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
 	var ax: float = m[0]
 	var az: float = m[1]
 	var w: float = m[2]
@@ -239,7 +244,8 @@ static func _emit_building(st: SurfaceTool, tw: SurfaceTool, roof: SurfaceTool,
 static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> MeshInstance3D:
 	var st := _st()
-	var st_b := _st()   # second facade surface: independent material params
+	var st_b := _st()   # extra facade surfaces: independent materials
+	var st_c := _st()
 	var p := plan.params_for(b)
 	var tints: Array = p["tints"]
 	var near_hero: bool = float(b["dist"]) < 300.0
@@ -251,9 +257,11 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 		# camera: keep them low so background never blocks subject.
 		if near_hero and float(b["z"]) > 31.0 and m[4] > 30.0:
 			m[4] = rng.randf_range(18.0, 30.0)
-		# Two facade vocabularies per block: neighbors stop sharing one
-		# window grammar, which was the loudest repetition up close.
-		_emit_building(st if rng.randf() < 0.55 else st_b, tw, roof, rng, m,
+		# Three facade materials per block (different wall scans where the
+		# library has them) x per-building style hashes in the shader.
+		var roll := rng.randf()
+		_emit_building(st if roll < 0.4 else (st_b if roll < 0.72 else st_c),
+				tw, roof, rng, m,
 				tints[rng.randi_range(0, tints.size() - 1)], xf, tower_p)
 	st.generate_normals()
 	st.generate_tangents()
@@ -261,13 +269,15 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	var mi := MeshInstance3D.new()
 	var mesh: ArrayMesh = st.commit()
 	roof.commit(mesh)   # surface 1: roof furniture, its own material
-	var b_arr: Array = st_b.commit_to_arrays()
-	var b_verts = b_arr[Mesh.ARRAY_VERTEX]
-	var has_b: bool = b_verts != null and not (b_verts as PackedVector3Array).is_empty()
-	if has_b:
-		st_b.generate_normals()
-		st_b.generate_tangents()
-		st_b.commit(mesh)
+	var extra_facades := 0
+	for sti in [st_b, st_c]:
+		var b_arr: Array = (sti as SurfaceTool).commit_to_arrays()
+		var b_verts = b_arr[Mesh.ARRAY_VERTEX]
+		if b_verts != null and not (b_verts as PackedVector3Array).is_empty():
+			sti.generate_normals()
+			sti.generate_tangents()
+			sti.commit(mesh)
+			extra_facades += 1
 	# Empty-check BEFORE generate_tangents: tangents on an empty surface
 	# throw, and the first version of this lost every towerless block to
 	# that throw (whole blocks rendered as bare sidewalk aprons).
@@ -308,7 +318,7 @@ static func _block_windowed(rng: RandomNumberGenerator, b: Dictionary,
 	if mesh.get_surface_count() > 1:
 		mi.set_surface_override_material(1, _roof_material())
 	var next_idx := 2
-	if has_b:
+	for k in range(extra_facades):
 		mi.set_surface_override_material(next_idx, _facade_material(rng, p))
 		next_idx += 1
 	if has_towers:
@@ -430,6 +440,7 @@ static func _wall(st: SurfaceTool, xf: Transform3D, bl: Vector3, br: Vector3, h:
 	for pair in [[bl + u, Vector2(0, h)], [br + u, Vector2(w, h)], [br, Vector2(w, 0)],
 			[bl + u, Vector2(0, h)], [br, Vector2(w, 0)], [bl, Vector2(0, 0)]]:
 		st.set_uv(pair[1])
+		st.set_uv2(_uv2)
 		st.add_vertex(xf * (pair[0] as Vector3))
 
 static func _top(st: SurfaceTool, xf: Transform3D, ax: float, az: float, w: float, d: float, h: float) -> void:
@@ -437,4 +448,5 @@ static func _top(st: SurfaceTool, xf: Transform3D, ax: float, az: float, w: floa
 			Vector3(ax + w, h, az + d), Vector3(ax, h, az + d)]
 	for i in [0, 1, 2, 0, 2, 3]:
 		st.set_uv(Vector2(pts[i].x, pts[i].z))
+		st.set_uv2(_uv2)
 		st.add_vertex(xf * (pts[i] as Vector3))

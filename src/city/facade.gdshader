@@ -47,6 +47,7 @@ uniform float lit_energy = 0.9;
 
 varying vec2 muv;
 varying vec3 vtint;
+varying vec2 vstyle;      // UV2: x = per-building style hash, y = tex offset
 varying float wallness;   // 1 on vertical faces, 0 on roofs
 
 void vertex() {
@@ -54,6 +55,7 @@ void vertex() {
 	// Per-mass tint for merged context meshes rides vertex color (defaults
 	// to white on meshes that do not set it).
 	vtint = COLOR.rgb;
+	vstyle = UV2;
 	wallness = 1.0 - abs((MODEL_MATRIX * vec4(NORMAL, 0.0)).y);
 }
 
@@ -75,40 +77,58 @@ void fragment() {
 		ROUGHNESS = 0.95;
 		METALLIC = 0.0;
 	} else {
+	// PER-BUILDING STYLE: every mass carries a hash in UV2.x, and the
+	// window grammar derives from it — bay rhythm, floor height, window
+	// proportions, glass tone. One material, a street of individuals.
+	// UV2 defaults to zero on meshes that do not author it (the hero
+	// block's curtain walls); zero means neutral multipliers.
+	float sb = vstyle.x;
+	float styled = step(0.0001, sb);
+	float bw_m = mix(1.0, mix(0.72, 1.45, fract(sb * 7.13)), styled);
+	float fh_m = mix(1.0, mix(0.90, 1.12, fract(sb * 13.7)), styled);
+	float wx_m = mix(1.0, mix(0.78, 1.25, fract(sb * 29.3)), styled);
+	float wy_m = mix(1.0, mix(0.85, 1.22, fract(sb * 53.1)), styled);
+	float bay_w = bay_width * bw_m;
+	float floor_h = floor_height * fh_m;
+	float ground_h = ground_floor_height * mix(1.0, mix(0.92, 1.14, fract(sb * 91.7)), styled);
+	float mx = muv.x + vstyle.y;   // texture/bay phase offset per building
 	float y = muv.y;
 	float fy;
 	float wx;
 	float wy;
-	if (y < ground_floor_height) {
-		fy = y / ground_floor_height;
+	if (y < ground_h) {
+		fy = y / ground_h;
 		wx = ground_window_frac_x;
 		wy = ground_window_frac_y;
 	} else {
-		fy = fract((y - ground_floor_height) / floor_height);
-		wx = window_frac_x;
-		wy = window_frac_y;
+		fy = fract((y - ground_h) / floor_h);
+		wx = clamp(window_frac_x * wx_m, 0.12, 0.95);
+		wy = clamp(window_frac_y * wy_m, 0.2, 0.9);
 	}
-	float fx = fract(muv.x / bay_width);
+	float fx = fract(mx / bay_w);
 	// Partial end bays get no window rather than a clipped one.
-	float bay_count = muv.x / bay_width;
+	float bay_count = mx / bay_w;
 	bool in_window = windows_enabled > 0.5
 			&& abs(fx - 0.5) < wx * 0.5
 			&& abs(fy - 0.54) < wy * 0.5;
 
-	vec2 wuv = muv * wall_uv_scale;
+	vec2 wuv = vec2(mx, muv.y) * wall_uv_scale;
 	if (in_window) {
 		float dx = abs(fx - 0.5) / (wx * 0.5);
 		float dy = abs(fy - 0.54) / (wy * 0.5);
 		float edge = max(dx, dy);
 		// Darken toward the frame: a punched-reveal read at aerial distance.
-		ALBEDO = glass_color.rgb * (0.45 + 0.55 * smoothstep(1.0, 0.7, edge));
+		// Glass tone varies per building: depth and a warm/cool lean.
+		vec3 g = glass_color.rgb * mix(1.0, mix(0.6, 1.5, fract(sb * 97.7)), styled);
+		g.b *= mix(1.0, mix(0.85, 1.25, fract(sb * 43.9)), styled);
+		ALBEDO = g * (0.45 + 0.55 * smoothstep(1.0, 0.7, edge));
 		ROUGHNESS = glass_roughness;
 		METALLIC = glass_metallic;
 		// One hash per window CELL: same window, same verdict, every frame.
 		// vtint joins the seed so two masses sharing a material still get
 		// independent patterns.
-		float bay_i = floor(muv.x / bay_width);
-		float floor_i = floor(max(y - ground_floor_height, -1.0) / floor_height);
+		float bay_i = floor(mx / bay_w);
+		float floor_i = floor(max(y - ground_h, -1.0) / floor_h);
 		float cell = fract(sin(dot(vec2(bay_i, floor_i), vec2(12.9898, 78.233))
 				+ win_seed + dot(vtint, vec3(17.7, 31.3, 47.1))) * 43758.5453);
 		float frac = (y < ground_floor_height) ? shop_lit_fraction : lit_fraction;
@@ -127,7 +147,7 @@ void fragment() {
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
 		ALBEDO = wall_col * wall_tint.rgb * vtint;
-		if (windows_enabled > 0.5 && y < ground_floor_height) {
+		if (windows_enabled > 0.5 && y < ground_h) {
 			// Shopfront band: the street wall of a real mixed-use block is
 			// not brick to the pavement — it is painted storefront surround
 			// with a signage strip over the glass. Darken and flatten the
