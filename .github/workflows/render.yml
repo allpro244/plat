@@ -20,6 +20,18 @@ jobs:
         run: bash tools/shoot.sh --out=renders/ci/latest.png
       - name: Determinism gate
         run: bash tools/shoot.sh --check
+      - name: Perceptual baseline gate
+        # Fails when the default render drifts from the committed baseline
+        # beyond tolerance — the instrument that notices a picture changing
+        # when nobody said it would. Regenerating renders/ci/baseline.png
+        # (deliberately, with a commit message saying why) accepts a change.
+        run: |
+          if [ -f renders/ci/baseline.png ]; then
+            godot --headless -s tools/imgdiff.gd -- \
+              renders/ci/latest.png renders/ci/baseline.png
+          else
+            echo "no baseline yet — seed renders/ci/baseline.png to arm this gate"
+          fi
       - name: Attach renders
         uses: actions/upload-artifact@v4
         with:
