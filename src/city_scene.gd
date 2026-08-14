@@ -81,6 +81,10 @@ func _ready() -> void:
 					_ground_material("sidewalk", Color(0.36, 0.35, 0.33), 0.8, 4.0),
 					_paint_material(), _grass_material()))
 	rig = CameraRig.new()
+	# An imported city aims at ITS OWN downtown (the manifest's core) — the
+	# engine puts the core wherever the island wants it, not at the origin.
+	if _import != null:
+		rig.set_target_xz(_import.core.x, _import.core.y)
 	add_child(rig)
 	rig.set_band(params["band"])
 	if params["cam_azimuth"] == null:

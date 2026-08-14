@@ -29,6 +29,7 @@ var piers: Array = []
 var esplanade: Array = []
 var buildings: Array = []                  # {ring, z0, z1, cls, floors, year, tone, deco}
 var radius_max := 0.0                      # coast bounding radius, for the camera clamp
+var core := Vector2.ZERO                   # downtown, from the manifest — the default aim
 
 static func load_city(path: String) -> CityImport:
 	var txt := FileAccess.get_file_as_string(path)
@@ -64,6 +65,9 @@ static func load_city(path: String) -> CityImport:
 		# north (+y in the engine) -> -z in Godot; see header.
 		return Vector2((float(p[0]) - lon0) * kx, -(float(p[1]) - lat0) * ky)
 
+	var core_ll: Variant = (doc.get("manifest", {}) as Dictionary).get("core")
+	if core_ll is Array and (core_ll as Array).size() == 2:
+		ci.core = proj.call(core_ll)
 	ci.coast = _ring(land_ll, proj)
 	for p in ci.coast:
 		ci.radius_max = maxf(ci.radius_max, p.length())
