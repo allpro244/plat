@@ -57,13 +57,19 @@ var _g_height := 120.0
 var _g_radius := 215.0
 var _g_target := Vector2.ZERO
 
-var _city_file := ""   # a plat-city/1 export; when set, the viewer plays it
+var _city_file := ""       # a plat-city/1 export; when set, the viewer plays it
+var _campaign_dir := ""    # a game-server campaign; when set, plat IS the game view
+var _hud_game := {}        # firm/date/cash from the campaign's hud.json
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--city="):
 			_city_file = a.substr(7)
+		elif a.begins_with("--campaign="):
+			_campaign_dir = a.substr(11).rstrip("/")
+			_city_file = _campaign_dir + "/city.json"
+			_load_game_hud()
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud = Label.new()
@@ -107,6 +113,9 @@ func _rebuild() -> void:
 ## save a frame, quit. This is how an interactive scene gets the same
 ## "verified by render" treatment as the still pipeline.
 func _run_selftest() -> void:
+	# One run only: the campaign-advance step below rebuilds the city, and a
+	# rebuild re-entering the selftest would loop forever.
+	_selftest = false
 	for step in [["pan", func() -> void: _pan_pixels(-400.0, 300.0)],
 			["recentre", func() -> void: _g_target = city._plan.core_center \
 					if city._plan != null else Vector2.ZERO],
@@ -120,6 +129,14 @@ func _run_selftest() -> void:
 		_snap()
 		await get_tree().process_frame
 		print("[plat] selftest %s -> %s" % [step[0], city.rig.describe()])
+	if _campaign_dir != "":
+		# The game loop itself, once: sim advances in node, city rebuilds.
+		var before := str(_hud_game.get("date", "?"))
+		await _advance_campaign(3)
+		while _busy:
+			await get_tree().process_frame
+		print("[plat] selftest campaign advance: %s -> %s" % [
+				before, str(_hud_game.get("date", "?"))])
 	for i in range(20):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
@@ -216,6 +233,34 @@ func _process(delta: float) -> void:
 	_g_radius = clampf(_g_radius, radius - 400.0, radius + 400.0)
 	_update_hud()
 
+func _load_game_hud() -> void:
+	var txt := FileAccess.get_file_as_string(_campaign_dir + "/hud.json")
+	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
+	_hud_game = doc if doc is Dictionary else {}
+
+## Advance the CAMPAIGN: the simulation runs in node (the engine repo's
+## game-server), plat re-reads the files it wrote and rebuilds. The sim owns
+## the quantities; this view never computes one.
+func _advance_campaign(months: int) -> void:
+	if _busy or _campaign_dir == "":
+		return
+	_busy = true
+	_hud.text = "advancing %d months (simulation runs in node)..." % months
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var meta: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
+	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
+	var out := []
+	var code := OS.execute("node", [runner, "advance", "--dir=" + _campaign_dir,
+			"--months=%d" % months], out, true)
+	_busy = false
+	if code != 0 or runner == "":
+		_hud.text = "advance FAILED (%d): %s" % [code, "".join(out).right(200)]
+		return
+	_load_game_hud()
+	_rebuild()
+
 func _update_hud() -> void:
 	if city == null or city.rig == null:
 		return
@@ -227,14 +272,23 @@ func _update_hud() -> void:
 				city._import.buildings.size()]
 	var help := ""
 	if _help_visible:
-		help = ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
+		if _campaign_dir != "":
+			help = "\n\nSPACE advance a season (the simulation decides what changed)"
+		help += ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
 				+ "\nleft-drag pan   right-drag rotate/tilt   wheel zoom"
 				+ "\narrows pan   PgUp/PgDn height   C re-centre downtown"
 				+ "\n1 2 3 band   T/G time   N new city   F preset view"
 				+ "\nH help   F12 screenshot   Esc quit")
-	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s" % [
+	var game_line := ""
+	if not _hud_game.is_empty():
+		game_line = "\nPLAT — %s | %s | %s | cash $%.2fM | %d holdings%s" % [
+				str(_hud_game.get("firm", "?")), str(_hud_game.get("city", "?")),
+				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6,
+				int(_hud_game.get("holdings", 0)),
+				"" if _hud_game.get("occ") == null else " | occ %.0f%%" % (float(_hud_game.get("occ", 0)) * 100.0)]
+	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s%s" % [
 			_fps, city.rig.describe(), _target.x, _target.y, int(time_of_day),
-			int(fposmod(time_of_day, 1.0) * 60.0), plan_line, help]
+			int(fposmod(time_of_day, 1.0) * 60.0), game_line, plan_line, help]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _busy:
@@ -289,6 +343,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_help_visible = not _help_visible
 			KEY_F12:
 				_screenshot()
+			KEY_SPACE:
+				# The game key: a season passes, the sim decides what
+				# changed, the city rebuilds to show it.
+				_advance_campaign(3)
 			KEY_ESCAPE:
 				get_tree().quit()
 

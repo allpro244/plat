@@ -25,3 +25,4 @@ renders/*.png.import
 
 # exported builds
 /dist/
+campaign/
