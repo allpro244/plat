@@ -72,9 +72,14 @@ func _ready() -> void:
 		# The scanned ground set, same as planned cities: streets read as
 		# asphalt and walks as concrete because they ARE those scans, not
 		# flat greys (flat greys were why the layout refused to read).
+		var walk := _ground_material("sidewalk", Color(0.245, 0.24, 0.225), 0.85, 4.0)
+		# The engine's pavement layer is whole PLATES (plazas, full-block
+		# aprons), not the planned city's narrow walks — at the scan's
+		# standard 0.62 modulate they blew out to white confetti across
+		# every mid-band frame. Concrete this expansive reads darker.
+		walk.albedo_color = walk.albedo_color * 0.72
 		add_child(ImportGen.build(_import,
-				_ground_material("asphalt", Color(0.155, 0.155, 0.16), 0.92, 6.0),
-				_ground_material("sidewalk", Color(0.335, 0.325, 0.30), 0.85, 4.0)))
+				_ground_material("asphalt", Color(0.155, 0.155, 0.16), 0.92, 6.0), walk))
 		add_child(ContextGen.build_imported(_import, _matlib, night))
 	if _import == null and not params.get("no_block", false):
 		_build_block()

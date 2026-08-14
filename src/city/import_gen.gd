@@ -24,7 +24,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 	# land plane IS the street network (blocks sit on their own lighter
 	# plates), and at noon 0.21 reads nearly the same as the 0.36 paving —
 	# measured on the first dressed render, where the streets vanished.
-	root.add_child(_mesh(land, _mat(Color(0.145, 0.145, 0.15), 0.94)))
+	root.add_child(_mesh(land, _mat(Color(0.12, 0.12, 0.125), 0.94)))
 
 	# The street reading, from the engine's actual topology (measured on
 	# seed 31337: 540 "pavement" sidewalk plates wrap 377 "block" lot
@@ -47,11 +47,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 	pave.begin(Mesh.PRIMITIVE_TRIANGLES)
 	pave.set_smooth_group(-1)
 	for ring in ci.pavements:
-		_cap(pave, ring, 0.12)
-		# The kerb FACE: 12 cm of vertical concrete stepping down to the
-		# asphalt. A floating plate has no shadow line; a kerb does, and
-		# the shadow line is most of what makes a street read as a street.
-		_skirt(pave, ring, 0.12, 0.04)
+		_cap(pave, ring, 0.10)
 	for ring in ci.esplanade:
 		_cap(pave, ring, 0.10)
 	for ring in ci.piers:
@@ -59,7 +55,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 		_skirt(pave, ring, 0.35, -3.0)
 	pave.generate_normals()
 	root.add_child(_mesh(pave, walk_mat if walk_mat != null
-			else _mat(Color(0.335, 0.325, 0.30), 0.85)))
+			else _mat(Color(0.245, 0.24, 0.225), 0.85)))
 
 	var lots := SurfaceTool.new()
 	lots.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -67,7 +63,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 	for ring in ci.blocks:
 		_cap(lots, ring, 0.14)
 	lots.generate_normals()
-	root.add_child(_mesh(lots, _mat(Color(0.185, 0.18, 0.17), 0.95)))
+	root.add_child(_mesh(lots, _mat(Color(0.16, 0.155, 0.15), 0.95)))
 
 	# Road paint: crosswalks and dashed centerlines, aged thermoplastic —
 	# same tone the planned city uses (fresh paint is ~0.75, city paint
@@ -83,7 +79,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 	# road=9), trimmed 8 m short of each corner so junctions stay clean.
 	# Facing kerbs from adjacent blocks land their dashes in the same
 	# place, which is exactly where the centerline belongs.
-	for ring in ci.pavements:
+	for ring in ci.blocks:
 		var n := (ring as PackedVector2Array).size()
 		for i in range(n):
 			var a := (ring as PackedVector2Array)[i]
@@ -104,7 +100,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 	path.begin(Mesh.PRIMITIVE_TRIANGLES)
 	path.set_smooth_group(-1)
 	for line in ci.parkpaths:
-		_ribbon(path, line, 2.4, 0.18)
+		_ribbon(path, line, 2.4, 0.28)
 	path.generate_normals()
 	root.add_child(_mesh(path, _mat(Color(0.42, 0.39, 0.34), 0.9)))
 
@@ -113,7 +109,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 	pond.begin(Mesh.PRIMITIVE_TRIANGLES)
 	pond.set_smooth_group(-1)
 	for ring in ci.ponds:
-		_cap(pond, ring, 0.19)
+		_cap(pond, ring, 0.30)
 	pond.generate_normals()
 	var pmat := _mat(Color(0.10, 0.14, 0.15), 0.15)
 	pmat.metallic = 0.4
@@ -130,7 +126,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 		trng.seed = hash("trees/%d" % ci.seed_value)
 		for p in ci.trees:
 			var green := Color(0.075, 0.115, 0.045) * trng.randf_range(0.8, 1.3)
-			GroundGen._tree(tst, Vector3(p.x, 0.17, p.y), trng.randf_range(2.4, 4.0),
+			GroundGen._tree(tst, Vector3(p.x, 0.27, p.y), trng.randf_range(2.4, 4.0),
 					trng.randf_range(5.0, 8.0), green)
 		tst.generate_normals()
 		root.add_child(_mesh(tst, GroundGen._tree_material()))
@@ -142,7 +138,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 		# Above the block/pavement plates (0.12): parks occupy block
 		# positions in the engine's plan, and a lawn under the plate is
 		# invisible — instrumented at 540 built verts rendering nowhere.
-		_cap(lawn, ring, 0.16)
+		_cap(lawn, ring, 0.26)
 	lawn.generate_normals()
 	root.add_child(_mesh(lawn, _mat(Color(0.30, 0.37, 0.24), 1.0)))
 
@@ -160,16 +156,17 @@ static func build(ci: CityImport, street_mat: Material = null,
 			# Bare dirt with a hint of the lot's tone index — an empty lot,
 			# not a white void.
 			masses.set_color(Color(0.32, 0.29, 0.25) * (0.9 + 0.06 * float(int(b["tone"]) % 3)))
-			_cap(masses, ring, 0.18)
+			_cap(masses, ring, 0.26)
 			continue
 		if not b["deco"]:
 			continue
 		masses.set_color(Color(0.30, 0.30, 0.31))
 		_prism_colored(masses, ring, float(b["z0"]), z1, Color(0.30, 0.30, 0.31))
 	masses.generate_normals()
-	var mmat := _mat(Color(1, 1, 1), 0.9)
-	mmat.vertex_color_use_as_albedo = true
-	root.add_child(_mesh(masses, mmat))
+	# Fixed dirt albedo, NOT vertex colors: the debug-color frame proved
+	# the vertex tints never landed on this surface, which rendered every
+	# vacant lot white — the "confetti" in three mid-band frames.
+	root.add_child(_mesh(masses, _mat(Color(0.30, 0.275, 0.24), 0.95)))
 
 	# Water: one plane under everything, past the coast to the horizon.
 	var water := MeshInstance3D.new()
