@@ -48,11 +48,63 @@ static func build(ci: CityImport) -> Node3D:
 	pave.generate_normals()
 	root.add_child(_mesh(pave, _mat(Color(0.30, 0.29, 0.27), 0.85)))
 
+	# Road paint: crosswalks and dashed centerlines, aged thermoplastic —
+	# same tone the planned city uses (fresh paint is ~0.75, city paint
+	# weathers well below that).
+	var paint := SurfaceTool.new()
+	paint.begin(Mesh.PRIMITIVE_TRIANGLES)
+	paint.set_smooth_group(-1)
+	for ring in ci.crosswalks:
+		_cap(paint, ring, 0.13)
+	for line in ci.centerlines:
+		_dashes(paint, line, 0.35, 2.8, 2.6, 0.135)
+	paint.generate_normals()
+	root.add_child(_mesh(paint, _mat(Color(0.62, 0.61, 0.58), 0.75)))
+
+	# Park paths: gravel ribbons.
+	var path := SurfaceTool.new()
+	path.begin(Mesh.PRIMITIVE_TRIANGLES)
+	path.set_smooth_group(-1)
+	for line in ci.parkpaths:
+		_ribbon(path, line, 2.4, 0.18)
+	path.generate_normals()
+	root.add_child(_mesh(path, _mat(Color(0.42, 0.39, 0.34), 0.9)))
+
+	# Park ponds: still water, above the lawn.
+	var pond := SurfaceTool.new()
+	pond.begin(Mesh.PRIMITIVE_TRIANGLES)
+	pond.set_smooth_group(-1)
+	for ring in ci.ponds:
+		_cap(pond, ring, 0.19)
+	pond.generate_normals()
+	var pmat := _mat(Color(0.10, 0.14, 0.15), 0.15)
+	pmat.metallic = 0.4
+	root.add_child(_mesh(pond, pmat))
+
+	# Trees: the engine plants them (street rows, park stands); the canopy
+	# impression is the planned city's — trunk spike + interlocked octahedra
+	# at real foliage albedo, through GroundGen's calibrated material.
+	if not ci.trees.is_empty():
+		var tst := SurfaceTool.new()
+		tst.begin(Mesh.PRIMITIVE_TRIANGLES)
+		tst.set_smooth_group(-1)
+		var trng := RandomNumberGenerator.new()
+		trng.seed = hash("trees/%d" % ci.seed_value)
+		for p in ci.trees:
+			var green := Color(0.075, 0.115, 0.045) * trng.randf_range(0.8, 1.3)
+			GroundGen._tree(tst, Vector3(p.x, 0.17, p.y), trng.randf_range(2.4, 4.0),
+					trng.randf_range(5.0, 8.0), green)
+		tst.generate_normals()
+		root.add_child(_mesh(tst, GroundGen._tree_material()))
+
 	var lawn := SurfaceTool.new()
 	lawn.begin(Mesh.PRIMITIVE_TRIANGLES)
 	lawn.set_smooth_group(-1)
 	for ring in ci.parks:
-		_cap(lawn, ring, 0.10)
+		# Above the block/pavement plates (0.12): parks occupy block
+		# positions in the engine's plan, and a lawn under the plate is
+		# invisible — instrumented at 540 built verts rendering nowhere.
+		_cap(lawn, ring, 0.16)
 	lawn.generate_normals()
 	root.add_child(_mesh(lawn, _mat(Color(0.30, 0.37, 0.24), 1.0)))
 
@@ -96,7 +148,14 @@ static func build(ci: CityImport) -> Node3D:
 static func _cap(st: SurfaceTool, ring: PackedVector2Array, y: float) -> void:
 	var idx := Geometry2D.triangulate_polygon(ring)
 	if idx.is_empty():
-		# Self-touching rings fail triangulation; skip rather than guess.
+		# Self-touching rings fail triangulation. A tiny inward offset
+		# through the polygon clipper repairs most of them (it re-noded
+		# the park lawns, which silently vanished before this existed);
+		# each repaired piece caps recursively.
+		for piece in Geometry2D.offset_polygon(ring, -0.05):
+			if not Geometry2D.is_polygon_clockwise(piece) and piece.size() >= 3 \
+					and piece.size() < ring.size() + 8:
+				_cap(st, piece, y)
 		return
 	# Both windings: ring orientation varies by source layer, and a cap that
 	# guesses wrong is invisible from above. Doubled tris are cheap at this
@@ -106,6 +165,46 @@ static func _cap(st: SurfaceTool, ring: PackedVector2Array, y: float) -> void:
 			var p := ring[idx[j]]
 			st.set_uv(Vector2(p.x, p.y) * 0.25)
 			st.add_vertex(Vector3(p.x, y, p.y))
+
+## Flat ribbon along a polyline (paths, lines). Both windings, like _cap.
+static func _ribbon(st: SurfaceTool, line: PackedVector2Array, w: float, y: float) -> void:
+	var hw := w * 0.5
+	for i in range(line.size() - 1):
+		var a := line[i]
+		var b := line[i + 1]
+		var d := (b - a)
+		if d.length() < 0.01:
+			continue
+		var n := Vector2(-d.y, d.x).normalized() * hw
+		_quad(st, a + n, b + n, b - n, a - n, y)
+
+## Dashed ribbon: dash/gap metres along the polyline.
+static func _dashes(st: SurfaceTool, line: PackedVector2Array, w: float,
+		dash: float, gap: float, y: float) -> void:
+	var hw := w * 0.5
+	for i in range(line.size() - 1):
+		var a := line[i]
+		var b := line[i + 1]
+		var seg := (b - a).length()
+		if seg < 0.01:
+			continue
+		var dir := (b - a) / seg
+		var n := Vector2(-dir.y, dir.x) * hw
+		var t := 0.0
+		while t < seg:
+			var t1 := minf(t + dash, seg)
+			var p0 := a + dir * t
+			var p1 := a + dir * t1
+			_quad(st, p0 + n, p1 + n, p1 - n, p0 - n, y)
+			t = t1 + gap
+
+static func _quad(st: SurfaceTool, p0: Vector2, p1: Vector2, p2: Vector2,
+		p3: Vector2, y: float) -> void:
+	var v := [Vector3(p0.x, y, p0.y), Vector3(p1.x, y, p1.y),
+			Vector3(p2.x, y, p2.y), Vector3(p3.x, y, p3.y)]
+	for j in [0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0]:
+		st.set_uv(Vector2((v[j] as Vector3).x, (v[j] as Vector3).z) * 0.25)
+		st.add_vertex(v[j])
 
 static func _skirt(st: SurfaceTool, ring: PackedVector2Array, y0: float, y1: float) -> void:
 	for i in range(ring.size()):

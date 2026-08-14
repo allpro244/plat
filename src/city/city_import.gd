@@ -19,6 +19,11 @@ var seed_value := 0
 var coast := PackedVector2Array()          # world-metre ring
 var pavements: Array = []                  # paved rings (sidewalk/block plates)
 var streets: Array = []                    # paveland: the street-level town floor
+var crosswalks: Array = []                 # painted crossing rings
+var ponds: Array = []                      # park water rings
+var trees: PackedVector2Array = PackedVector2Array()
+var centerlines: Array = []                # street centerline polylines
+var parkpaths: Array = []                  # park path polylines
 var parks: Array = []                      # park lawn rings
 var piers: Array = []
 var esplanade: Array = []
@@ -66,7 +71,21 @@ static func load_city(path: String) -> CityImport:
 	for f in (doc["context"]["features"] as Array):
 		var props: Dictionary = f["properties"]
 		var geom: Dictionary = f["geometry"]
-		if str(geom.get("type", "")) != "Polygon":
+		var gtype := str(geom.get("type", ""))
+		var kind := str(props.get("kind", ""))
+		if gtype == "Point":
+			if kind == "tree":
+				ci.trees.append(proj.call(geom["coordinates"]))
+			continue
+		if gtype == "LineString":
+			if kind == "centerline" or kind == "parkpath":
+				var line := PackedVector2Array()
+				for pt in (geom["coordinates"] as Array):
+					line.append(proj.call(pt))
+				if line.size() >= 2:
+					(ci.centerlines if kind == "centerline" else ci.parkpaths).append(line)
+			continue
+		if gtype != "Polygon":
 			continue
 		# A GeoJSON polygon's rings beyond the first are HOLES — the
 		# esplanade is an annulus, and filling its outer ring alone
@@ -80,6 +99,8 @@ static func load_city(path: String) -> CityImport:
 			"paveland": ci.streets.append_array(rings)
 			"park": ci.parks.append_array(rings)
 			"pier": ci.piers.append_array(rings)
+			"crosswalk": ci.crosswalks.append_array(rings)
+			"pond": ci.ponds.append_array(rings)
 			# esplanade is deliberately NOT filled: it is an annulus, and
 			# Geometry2D.clip_polygons represents the result as outer+hole
 			# rings which a naive fill paints as two blankets over the whole
@@ -128,6 +149,8 @@ static func _polys(coords: Array, proj: Callable) -> Array:
 	var outer := _ring(coords[0], proj)
 	if outer.size() < 3:
 		return []
+	if _shoelace(outer) < 0.0:
+		outer.reverse()
 	var result: Array = [outer]
 	for h in range(1, coords.size()):
 		var hole := _ring(coords[h], proj)
