@@ -132,6 +132,10 @@ static func load_city(path: String) -> CityImport:
 			"crown": int(b.get("x", 0)) == 1,
 			"district": str(par.get("district", "?")),
 			"demand": float(par.get("demandScore", 0.0)),
+			# The economy's occupancy for this parcel (0-1), simulated by
+			# the engine when the export ran with --months. Drives dusk
+			# windows; absent in old exports -> -1 sentinel.
+			"occ": float(par.get("occ", -1.0)),
 		})
 	var esp_m2 := 0.0
 	for r in ci.esplanade:

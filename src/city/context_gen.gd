@@ -98,10 +98,25 @@ static func build_imported(ci: CityImport, matlib: Dictionary,
 	# Chunk the city so each mesh stays a reasonable upload; grouping by
 	# stride keeps neighbours in different chunks irrelevant — materials
 	# are per-era surfaces inside each chunk either way.
+	# Chunks are grouped by OCCUPANCY BUCKET, because lit_fraction is a
+	# per-material uniform: every building in a chunk shares one lit level,
+	# so the buckets make dusk windows follow the economy's occupancy to
+	# within ~6%. Old exports without occupancy fall into one bucket and
+	# keep the district constants.
 	var chunk := 140
-	for c0 in range(0, ci.buildings.size(), chunk):
-		root.add_child(_imported_chunk(ci, c0, mini(c0 + chunk, ci.buildings.size()),
-				fam, district_p))
+	var buckets := {}
+	for i in range(ci.buildings.size()):
+		var occ: float = ci.buildings[i]["occ"]
+		var k := -1 if occ < 0.0 else clampi(int(occ * 8.0), 0, 7)
+		if not buckets.has(k):
+			buckets[k] = []
+		buckets[k].append(i)
+	for k in buckets:
+		var idxs: Array = buckets[k]
+		var lit := -1.0 if k == -1 else (float(k) + 0.5) / 8.0
+		for c0 in range(0, idxs.size(), chunk):
+			root.add_child(_imported_chunk(ci, idxs.slice(c0, mini(c0 + chunk, idxs.size())),
+					fam, district_p, lit))
 	return root
 
 static func _imported_district_p(district: String, seed_value: int,
@@ -129,8 +144,8 @@ static func _imported_district_p(district: String, seed_value: int,
 	cache[district] = p
 	return p
 
-static func _imported_chunk(ci: CityImport, from: int, to: int,
-		fam: Dictionary, district_p: Dictionary) -> MeshInstance3D:
+static func _imported_chunk(ci: CityImport, indices: Array,
+		fam: Dictionary, district_p: Dictionary, lit_occ: float) -> MeshInstance3D:
 	var st := _st()
 	var st_b := _st()
 	var st_c := _st()
@@ -138,7 +153,7 @@ static func _imported_chunk(ci: CityImport, from: int, to: int,
 	var tw := _st()
 	var xf := Transform3D.IDENTITY
 	var p_any: Dictionary = {}
-	for i in range(from, to):
+	for i in indices:
 		var b: Dictionary = ci.buildings[i]
 		if b["deco"] or float(b["z1"]) <= 0.05:
 			continue   # scenery and vacant lots are ImportGen's problem
@@ -184,7 +199,8 @@ static func _imported_chunk(ci: CityImport, from: int, to: int,
 	var mi := MeshInstance3D.new()
 	var mesh := ArrayMesh.new()
 	var rng2 := RandomNumberGenerator.new()
-	rng2.seed = hash("%d/impmat/%d" % [ci.seed_value, from])
+	rng2.seed = hash("%d/impmat/%d" % [ci.seed_value,
+			int(indices[0]) if not indices.is_empty() else 0])
 	if p_any.is_empty():
 		p_any = {"bay": 1.5, "win_fx": 0.55, "lit": 0.25, "shop_lit": 0.5}
 	var mats: Array = []
@@ -202,10 +218,18 @@ static func _imported_chunk(ci: CityImport, from: int, to: int,
 		if entry[1] == null:
 			mats.append(_roof_material())
 		elif entry[1] == "tower":
-			mats.append(_tower_material(rng2))
+			var tm := _tower_material(rng2)
+			if lit_occ >= 0.0:
+				tm.set_shader_parameter("lit_fraction", lit_occ * night)
+			mats.append(tm)
 		else:
 			var em := _facade_material(rng2, p_any)
 			_apply_era(em, ERAS[entry[1]], rng2)
+			# STAGE 4 (docs/ECONOMY-ADAPTER.md): dusk windows follow the
+			# SIMULATED occupancy of this chunk's bucket, not a district
+			# constant — a vacant building goes dark because it is vacant.
+			if lit_occ >= 0.0:
+				em.set_shader_parameter("lit_fraction", lit_occ * night)
 			mats.append(em)
 	mi.mesh = mesh
 	for i in range(mats.size()):
