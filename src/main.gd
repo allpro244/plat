@@ -57,8 +57,13 @@ var _g_height := 120.0
 var _g_radius := 215.0
 var _g_target := Vector2.ZERO
 
+var _city_file := ""   # a plat-city/1 export; when set, the viewer plays it
+
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--city="):
+			_city_file = a.substr(7)
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud = Label.new()
@@ -86,7 +91,10 @@ func _rebuild() -> void:
 	# the cascades re-converge forever, which reads as a smeared, blotchy
 	# distortion crawling over distant buildings (owner-reported). The
 	# non-GI ambient path is calibrated for exactly this fallback.
-	city = CityScene.new({"seed": seed_value, "time": time_of_day, "gi": false})
+	var params := {"seed": seed_value, "time": time_of_day, "gi": false}
+	if _city_file != "":
+		params["city"] = _city_file
+	city = CityScene.new(params)
 	add_child(city)
 	city.rig.set_band(band)
 	_snap()
@@ -100,7 +108,8 @@ func _rebuild() -> void:
 ## "verified by render" treatment as the still pipeline.
 func _run_selftest() -> void:
 	for step in [["pan", func() -> void: _pan_pixels(-400.0, 300.0)],
-			["recentre", func() -> void: _g_target = city._plan.core_center],
+			["recentre", func() -> void: _g_target = city._plan.core_center \
+					if city._plan != null else Vector2.ZERO],
 			["orbit", func() -> void: _orbit(45.0)],
 			["dolly", func() -> void: _dolly(30.0)],
 			["height", func() -> void: _height(25.0)],
@@ -165,6 +174,8 @@ func _pan_pixels(dx: float, dy: float) -> void:
 	var limit := 2600.0
 	if city and city._plan != null:
 		limit = city._plan.city_limit(atan2(_g_target.y, _g_target.x)) + 400.0
+	elif city and city._import != null:
+		limit = city._import.radius_max + 400.0
 	if _g_target.length() > limit:
 		_g_target = _g_target.normalized() * limit
 
@@ -211,6 +222,9 @@ func _update_hud() -> void:
 	var plan_line := ""
 	if city._plan != null:
 		plan_line = "\n%s" % city._plan.describe().replace("plan ", "")
+	elif city._import != null:
+		plan_line = "\n%s — engine city (%d buildings)" % [city._import.name,
+				city._import.buildings.size()]
 	var help := ""
 	if _help_visible:
 		help = ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
@@ -256,7 +270,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_rebuild()
 			KEY_N:
 				# A new city every time, and the seed is printed so any
-				# city you like can be reproduced exactly.
+				# city you like can be reproduced exactly. From an imported
+				# city, N returns to plat's own generator — new ENGINE
+				# cities are minted by the exporter, not a keypress.
+				_city_file = ""
 				seed_value = randi() % 100000
 				_rebuild()
 			KEY_R:

@@ -175,6 +175,12 @@ static func _imported_chunk(ci: CityImport, from: int, to: int,
 			if bba > 30.0 and absf(CityImport._shoelace(ring)) / bba > 0.72:
 				_roofscape(roof, rng, [bb.position.x, bb.position.y,
 						bb.size.x, bb.size.y, z0 + h], xf)
+				# Masonry eras carry a projecting cornice — the shadow line
+				# that caps a pre-war street wall (probability by era).
+				if not glassy and era_name != "midcentury" \
+						and rng.randf() < float(ERAS[era_name]["cornice_p"]):
+					_cornice(roof, xf, bb.position.x, bb.position.y,
+							bb.size.x, bb.size.y, z0 + h, tint)
 	var mi := MeshInstance3D.new()
 	var mesh := ArrayMesh.new()
 	var rng2 := RandomNumberGenerator.new()
