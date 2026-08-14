@@ -137,9 +137,16 @@ static func load_city(path: String) -> CityImport:
 			ring.reverse()
 		var bbl := str(b.get("b", ""))
 		var par: Dictionary = parcels.get(bbl, {})
+		var bb := Rect2(ring[0], Vector2.ZERO)
+		for q in ring:
+			bb = bb.expand(q)
 		ci.buildings.append({
 			"bbl": bbl,
 			"ring": ring,
+			"bbox": bb,
+			"sqft": float(par.get("bldgArea", 0.0)),
+			"lot_sqft": float(par.get("lotArea", 0.0)),
+			"held": int(par.get("held", 0)) == 1,
 			"z0": float(b.get("z0", 0.0)),
 			"z1": float(b.get("z1", 0.0)),
 			"cls": str(b.get("c", "?")),

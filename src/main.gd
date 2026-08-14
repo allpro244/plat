@@ -42,6 +42,8 @@ var radius := 215.0
 var band := "near"
 var time_of_day := 15.5
 var _hud: Label
+var _card: Label
+var _press_pos := Vector2.ZERO   # to tell a click from a drag
 var _help_visible := true
 var _busy := false
 var _panning := false
@@ -94,6 +96,19 @@ func _ready() -> void:
 	_hud.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	_hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(_hud)
+	# The parcel card: what a clicked building IS, by the record — the same
+	# numbers the acquisition desk prices off.
+	_card = Label.new()
+	_card.add_theme_color_override("font_color", Color(1, 1, 1))
+	_card.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_card.add_theme_constant_override("outline_size", 7)
+	_card.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	# Plain absolute placement: anchor presets make `position` an offset
+	# from the anchored edge, which put the first card 1,180 px past the
+	# right border — an invisible card, caught by the selftest frame.
+	_card.position = Vector2(get_viewport().get_visible_rect().size.x - 420, 12)
+	_card.visible = false
+	layer.add_child(_card)
 	_hud.text = "generating city..."
 	await get_tree().process_frame
 	_rebuild()
@@ -145,6 +160,23 @@ func _run_selftest() -> void:
 		_snap()
 		await get_tree().process_frame
 		print("[plat] selftest %s -> %s" % [step[0], city.rig.describe()])
+	if city._import != null and not city._import.buildings.is_empty():
+		# Prove the parcel card: pick a real building through the camera.
+		var cam := get_viewport().get_camera_3d()
+		for b in city._import.buildings:
+			if b["deco"] or float(b["z1"]) < 8.0 or not b["sqft"] > 0.0:
+				continue
+			var bb: Rect2 = b["bbox"]
+			var c := bb.get_center()
+			var world := Vector3(c.x, float(b["z1"]) * 0.5, c.y)
+			if cam.is_position_behind(world):
+				continue
+			_pick_building(cam.unproject_position(world))
+			if _card.visible:
+				print("[plat] selftest pick: ", _card.text.replace("\n", " | "))
+				break
+		if not _card.visible:
+			printerr("[plat] selftest pick FAILED: no building card")
 	if _campaign_dir != "":
 		# The game loop itself, once: sim advances in node, city rebuilds.
 		var before := str(_hud_game.get("date", "?"))
@@ -277,6 +309,75 @@ func _advance_campaign(months: int) -> void:
 	_load_game_hud()
 	_rebuild()
 
+## Pick the building under a screen point: ray against each imported
+## building's extruded footprint box, nearest hit wins, refined by
+## point-in-polygon at the hit so neighbouring boxes cannot steal a click.
+## No physics bodies — the city is batched meshes, and 1,400 AABB tests
+## per click is nothing.
+func _pick_building(screen: Vector2) -> void:
+	if city == null or city._import == null:
+		_card.visible = false
+		return
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var from := cam.project_ray_origin(screen)
+	var dir := cam.project_ray_normal(screen)
+	var best_t := 1e18
+	var best: Dictionary = {}
+	for b in city._import.buildings:
+		if b["deco"]:
+			continue
+		var bb: Rect2 = b["bbox"]
+		var top: float = maxf(float(b["z1"]), 4.0)   # vacant lots stay clickable
+		var aabb := AABB(Vector3(bb.position.x, -0.5, bb.position.y),
+				Vector3(bb.size.x, top + 0.5, bb.size.y))
+		var hit: Variant = aabb.intersects_ray(from, dir)
+		if hit == null:
+			continue
+		var t := (hit as Vector3).distance_to(from)
+		if t >= best_t:
+			continue
+		# Refine: the ray must actually cross the footprint, not just the box.
+		var p := hit as Vector3
+		var inside := Geometry2D.is_point_in_polygon(Vector2(p.x, p.z), b["ring"])
+		if not inside:
+			# Facade hits land on the box wall; test the ground-projected walk
+			# of the ray a few metres further in.
+			var q := p + dir * 3.0
+			inside = Geometry2D.is_point_in_polygon(Vector2(q.x, q.z), b["ring"])
+		if inside:
+			best_t = t
+			best = b
+	if best.is_empty():
+		_card.visible = false
+		return
+	_show_card(best)
+
+func _show_card(b: Dictionary) -> void:
+	var par: Dictionary = b
+	var occ_line := "—"
+	if float(par.get("occ", -1.0)) >= 0.0:
+		occ_line = "%.0f%% occupied" % (float(par["occ"]) * 100.0)
+	var lines := [
+		"BBL %s%s" % [str(par.get("bbl", "?")), "   ★ YOURS" if par.get("held", false) else ""],
+		"%s · %s" % [str(par.get("cls", "?")).to_upper(), str(par.get("district", "?"))],
+		"%s sf building · %s sf lot" % [_fmt_sf(float(par.get("sqft", 0.0))),
+				_fmt_sf(float(par.get("lot_sqft", 0.0)))],
+		"%d floors · built %d" % [int(par.get("floors", 0)), int(par.get("year", 0))],
+		occ_line,
+	]
+	_card.text = "\n".join(lines)
+	_card.visible = true
+
+static func _fmt_sf(v: float) -> String:
+	var s := str(int(roundf(v)))
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.right(3) + out
+		s = s.left(s.length() - 3)
+	return s + out
+
 func _update_hud() -> void:
 	if city == null or city.rig == null:
 		return
@@ -312,6 +413,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				_press_pos = mb.position
+			elif _press_pos.distance_to(mb.position) < 6.0:
+				# A press that never moved is a CLICK: pick the parcel.
+				_pick_building(mb.position)
 			_panning = mb.pressed
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			_rotating = mb.pressed
