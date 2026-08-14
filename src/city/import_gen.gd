@@ -7,7 +7,8 @@ extends RefCounted
 ## wired to the quantities. Footprints can be concave (L-shaped lots), so
 ## caps go through Geometry2D.triangulate_polygon rather than a centroid fan.
 
-static func build(ci: CityImport) -> Node3D:
+static func build(ci: CityImport, street_mat: Material = null,
+		walk_mat: Material = null) -> Node3D:
 	var root := Node3D.new()
 	root.name = "ImportedCity"
 
@@ -39,20 +40,26 @@ static func build(ci: CityImport) -> Node3D:
 	for ring in ci.streets:
 		_cap(street, ring, 0.06)
 	street.generate_normals()
-	root.add_child(_mesh(street, _mat(Color(0.155, 0.155, 0.16), 0.92)))
+	root.add_child(_mesh(street, street_mat if street_mat != null
+			else _mat(Color(0.155, 0.155, 0.16), 0.92)))
 
 	var pave := SurfaceTool.new()
 	pave.begin(Mesh.PRIMITIVE_TRIANGLES)
 	pave.set_smooth_group(-1)
 	for ring in ci.pavements:
 		_cap(pave, ring, 0.12)
+		# The kerb FACE: 12 cm of vertical concrete stepping down to the
+		# asphalt. A floating plate has no shadow line; a kerb does, and
+		# the shadow line is most of what makes a street read as a street.
+		_skirt(pave, ring, 0.12, 0.04)
 	for ring in ci.esplanade:
 		_cap(pave, ring, 0.10)
 	for ring in ci.piers:
 		_cap(pave, ring, 0.35)
 		_skirt(pave, ring, 0.35, -3.0)
 	pave.generate_normals()
-	root.add_child(_mesh(pave, _mat(Color(0.335, 0.325, 0.30), 0.85)))
+	root.add_child(_mesh(pave, walk_mat if walk_mat != null
+			else _mat(Color(0.335, 0.325, 0.30), 0.85)))
 
 	var lots := SurfaceTool.new()
 	lots.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -70,6 +77,25 @@ static func build(ci: CityImport) -> Node3D:
 	paint.set_smooth_group(-1)
 	for ring in ci.crosswalks:
 		_cap(paint, ring, 0.13)
+	# Lane dashes on the actual carriageway: each kerb edge long enough to
+	# be a street frontage, offset OUTWARD by half the ~9 m carriageway the
+	# engine reserves between blocks (its own crosswalk emitter uses
+	# road=9), trimmed 8 m short of each corner so junctions stay clean.
+	# Facing kerbs from adjacent blocks land their dashes in the same
+	# place, which is exactly where the centerline belongs.
+	for ring in ci.pavements:
+		var n := (ring as PackedVector2Array).size()
+		for i in range(n):
+			var a := (ring as PackedVector2Array)[i]
+			var b := (ring as PackedVector2Array)[(i + 1) % n]
+			var seg := (b - a).length()
+			if seg < 26.0:
+				continue
+			var dir := (b - a) / seg
+			var out := Vector2(dir.y, -dir.x)   # CCW ring: outward is right
+			var p0 := a + dir * 8.0 + out * 4.5
+			var p1 := b - dir * 8.0 + out * 4.5
+			_dashes(paint, PackedVector2Array([p0, p1]), 0.3, 2.8, 3.2, 0.10)
 	paint.generate_normals()
 	root.add_child(_mesh(paint, _mat(Color(0.62, 0.61, 0.58), 0.75)))
 

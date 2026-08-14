@@ -69,7 +69,12 @@ func _ready() -> void:
 	MeshBuilder.skip_windows = params.get("skip_windows", false)
 	MeshBuilder.skip_props = params.get("skip_props", false)
 	if _import != null:
-		add_child(ImportGen.build(_import))
+		# The scanned ground set, same as planned cities: streets read as
+		# asphalt and walks as concrete because they ARE those scans, not
+		# flat greys (flat greys were why the layout refused to read).
+		add_child(ImportGen.build(_import,
+				_ground_material("asphalt", Color(0.155, 0.155, 0.16), 0.92, 6.0),
+				_ground_material("sidewalk", Color(0.335, 0.325, 0.30), 0.85, 4.0)))
 		add_child(ContextGen.build_imported(_import, _matlib, night))
 	if _import == null and not params.get("no_block", false):
 		_build_block()
@@ -85,6 +90,8 @@ func _ready() -> void:
 	# engine puts the core wherever the island wants it, not at the origin.
 	if _import != null:
 		rig.set_target_xz(_import.core.x, _import.core.y)
+	if params.get("target_x") != null:
+		rig.set_target_xz(float(params["target_x"]), float(params.get("target_z", 0.0)))
 	add_child(rig)
 	rig.set_band(params["band"])
 	if params["cam_azimuth"] == null:

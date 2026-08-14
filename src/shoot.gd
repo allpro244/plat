@@ -95,6 +95,10 @@ func _parse_args() -> Dictionary:
 				p["skip_ground"] = val == "off"
 			"city":
 				p["city"] = val
+			"tx":
+				p["target_x"] = float(val)
+			"tz":
+				p["target_z"] = float(val)
 			_:
 				printerr("[plat] unknown arg --", key)
 	return p

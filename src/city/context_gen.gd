@@ -177,11 +177,31 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 		# year are the engine's; the glazing is ours.
 		var glassy := (cls == "office" or cls == "mix") and year >= 1958 \
 				and float(b["z1"]) > 40.0
+		# Roof tone from the engine's tone index, weighted dark — a city of
+		# white lids was the single loudest thing in the first street-level
+		# frame. Crown volumes (the engine's pitched/parapet roof caps,
+		# x:1) are ROOF, not facade: they were wearing wall tint and
+		# reading as pale slabs over every midrise.
+		var rtones := [Color(0.13, 0.13, 0.14), Color(0.16, 0.16, 0.17),
+				Color(0.20, 0.20, 0.21), Color(0.30, 0.19, 0.15),
+				Color(0.17, 0.21, 0.18)]
+		var rtone: Color = rtones[(int(b["tone"]) + int(rng.randf() * 2.0)) % rtones.size()] \
+				* rng.randf_range(0.85, 1.15)
+		# x:1 marks the topmost volume of a building — for most buildings
+		# that IS the windowed body (first render treating every x:1 as a
+		# roof turned half the city into toneless grey prisms). Only a
+		# THIN cap sitting on a body below it is roof furniture.
+		if b["crown"] and h < 5.0 and z0 > 3.0:
+			roof.set_color(rtone)
+			_ring_walls(roof, ring, z0, h)
+			_ring_cap(roof, ring, z0 + h, rtone)
+			continue
 		var sti: SurfaceTool = tw if glassy else \
 				(st if era_name == "victorian" else (st_b if era_name == "prewar" else st_c))
 		sti.set_color(Color(1, 1, 1) if glassy else tint)
 		_ring_walls(sti, ring, z0, h)
-		_ring_cap(sti, ring, z0 + h, tint if not glassy else Color(1, 1, 1))
+		roof.set_color(rtone)
+		_ring_cap(roof, ring, z0 + h, rtone)
 		# Roof furniture only on near-rectangular main volumes: parapet
 		# boxes follow the bounding box, and on an L-plan they would float.
 		if not b["crown"] and z0 < 0.5:
