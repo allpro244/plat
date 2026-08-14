@@ -19,6 +19,7 @@ var seed_value := 0
 var coast := PackedVector2Array()          # world-metre ring
 var pavements: Array = []                  # paved rings (sidewalk/block plates)
 var streets: Array = []                    # paveland: the street-level town floor
+var blocks: Array = []                     # lot-interior plates (inside the kerb)
 var crosswalks: Array = []                 # painted crossing rings
 var ponds: Array = []                      # park water rings
 var trees: PackedVector2Array = PackedVector2Array()
@@ -82,12 +83,15 @@ static func load_city(path: String) -> CityImport:
 				ci.trees.append(proj.call(geom["coordinates"]))
 			continue
 		if gtype == "LineString":
-			if kind == "centerline" or kind == "parkpath":
+			# "centerline"/"street" LineStrings are KERB RINGS (block
+			# outlines), not road spines — drawing dashes along them read
+			# as parking-lot paint, which is why the streets looked wrong.
+			if kind == "parkpath":
 				var line := PackedVector2Array()
 				for pt in (geom["coordinates"] as Array):
 					line.append(proj.call(pt))
 				if line.size() >= 2:
-					(ci.centerlines if kind == "centerline" else ci.parkpaths).append(line)
+					ci.parkpaths.append(line)
 			continue
 		if gtype != "Polygon":
 			continue
@@ -99,7 +103,8 @@ static func load_city(path: String) -> CityImport:
 		if rings.is_empty():
 			continue
 		match str(props.get("kind", "")):
-			"pavement", "apron", "block": ci.pavements.append_array(rings)
+			"pavement", "apron": ci.pavements.append_array(rings)
+			"block": ci.blocks.append_array(rings)
 			"paveland": ci.streets.append_array(rings)
 			"park": ci.parks.append_array(rings)
 			"pier": ci.piers.append_array(rings)

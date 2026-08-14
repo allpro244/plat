@@ -25,15 +25,21 @@ static func build(ci: CityImport) -> Node3D:
 	# measured on the first dressed render, where the streets vanished.
 	root.add_child(_mesh(land, _mat(Color(0.145, 0.145, 0.15), 0.94)))
 
-	# The town floor (paveland) is the STREET surface: dark asphalt under
-	# the lighter block plates, which is what makes the street network read.
+	# The street reading, from the engine's actual topology (measured on
+	# seed 31337: 540 "pavement" sidewalk plates wrap 377 "block" lot
+	# interiors, and the streets are the paveland left between them):
+	#   paveland .... dark asphalt — the carriageway
+	#   pavement .... light concrete sidewalk plates, kerb-height above it
+	#   block ....... lot-interior ground, backlot-dark like planned cities
+	# The old single mid-grey pile made all three the same surface, which
+	# is exactly why the street layout read as mush.
 	var street := SurfaceTool.new()
 	street.begin(Mesh.PRIMITIVE_TRIANGLES)
 	street.set_smooth_group(-1)
 	for ring in ci.streets:
 		_cap(street, ring, 0.06)
 	street.generate_normals()
-	root.add_child(_mesh(street, _mat(Color(0.185, 0.185, 0.19), 0.92)))
+	root.add_child(_mesh(street, _mat(Color(0.155, 0.155, 0.16), 0.92)))
 
 	var pave := SurfaceTool.new()
 	pave.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -46,7 +52,15 @@ static func build(ci: CityImport) -> Node3D:
 		_cap(pave, ring, 0.35)
 		_skirt(pave, ring, 0.35, -3.0)
 	pave.generate_normals()
-	root.add_child(_mesh(pave, _mat(Color(0.30, 0.29, 0.27), 0.85)))
+	root.add_child(_mesh(pave, _mat(Color(0.335, 0.325, 0.30), 0.85)))
+
+	var lots := SurfaceTool.new()
+	lots.begin(Mesh.PRIMITIVE_TRIANGLES)
+	lots.set_smooth_group(-1)
+	for ring in ci.blocks:
+		_cap(lots, ring, 0.14)
+	lots.generate_normals()
+	root.add_child(_mesh(lots, _mat(Color(0.185, 0.18, 0.17), 0.95)))
 
 	# Road paint: crosswalks and dashed centerlines, aged thermoplastic —
 	# same tone the planned city uses (fresh paint is ~0.75, city paint
@@ -56,8 +70,6 @@ static func build(ci: CityImport) -> Node3D:
 	paint.set_smooth_group(-1)
 	for ring in ci.crosswalks:
 		_cap(paint, ring, 0.13)
-	for line in ci.centerlines:
-		_dashes(paint, line, 0.35, 2.8, 2.6, 0.135)
 	paint.generate_normals()
 	root.add_child(_mesh(paint, _mat(Color(0.62, 0.61, 0.58), 0.75)))
 
