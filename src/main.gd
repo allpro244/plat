@@ -57,6 +57,22 @@ var _g_height := 120.0
 var _g_radius := 215.0
 var _g_target := Vector2.ZERO
 
+## Engine cities shipped inside the build: each is a whole island the
+## economy generated (coast, parcels, classes, years, occupancy), rendered
+## by plat. `E` cycles them; `N` returns to plat's own generator.
+const ENGINE_CITIES := [
+	"data/city-1928.json",   # Port Tarrstead — harbour bight, wedge park
+	"data/city-777.json",    # Caldwich — twin parks, wide avenues
+	"data/city-31337.json",  # Ashdon Island — headland tower cluster
+	"data/city-8080.json",   # Salgate Island — broad, five parks
+	"data/city-12345.json",  # Rookwich — dense old-town knot
+	"data/city-222.json",    # Eskthorpe Reach — three parks down the spine
+	"data/city-6060.json",   # New Presstone — Y-fork of diagonals
+	"data/city-4711.json",   # Wendworth Point — one supertall over the park
+	"data/city-90210.json",  # Eskley Point — rectangular central park
+]
+var _engine_pick := -1
+
 var _city_file := ""       # a plat-city/1 export; when set, the viewer plays it
 var _campaign_dir := ""    # a game-server campaign; when set, plat IS the game view
 var _hud_game := {}        # firm/date/cash from the campaign's hud.json
@@ -277,7 +293,7 @@ func _update_hud() -> void:
 		help += ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
 				+ "\nleft-drag pan   right-drag rotate/tilt   wheel zoom"
 				+ "\narrows pan   PgUp/PgDn height   C re-centre downtown"
-				+ "\n1 2 3 band   T/G time   N new city   F preset view"
+				+ "\n1 2 3 band   T/G time   N new city   E engine city   F preset view"
 				+ "\nH help   F12 screenshot   Esc quit")
 	var game_line := ""
 	if not _hud_game.is_empty():
@@ -328,6 +344,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				# city, N returns to plat's own generator — new ENGINE
 				# cities are minted by the exporter, not a keypress.
 				_city_file = ""
+				_engine_pick = -1
 				seed_value = randi() % 100000
 				_rebuild()
 			KEY_R:
@@ -343,6 +360,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				_help_visible = not _help_visible
 			KEY_F12:
 				_screenshot()
+			KEY_E:
+				# Cycle the ENGINE cities shipped with the build: islands
+				# the economy generated, with its parcels, classes, years
+				# and occupancy. N stays plat's own generator.
+				if _campaign_dir == "":
+					_engine_pick = (_engine_pick + 1) % ENGINE_CITIES.size()
+					_city_file = ENGINE_CITIES[_engine_pick]
+					_g_target = Vector2.ZERO
+					_snap()
+					_rebuild()
 			KEY_SPACE:
 				# The game key: a season passes, the sim decides what
 				# changed, the city rebuilds to show it.

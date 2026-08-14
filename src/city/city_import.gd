@@ -33,7 +33,16 @@ var radius_max := 0.0                      # coast bounding radius, for the came
 var core := Vector2.ZERO                   # downtown, from the manifest — the default aim
 
 static func load_city(path: String) -> CityImport:
-	var txt := FileAccess.get_file_as_string(path)
+	# A bundled city lives inside the PCK of an exported build, where only
+	# res:// resolves; a campaign's city.json lives on the real filesystem.
+	# Try the pack first, then the disk — the same dual path the material
+	# loader needed, and for the same reason (an exported build that could
+	# not find its own data shipped once).
+	var txt := ""
+	if not path.begins_with("/") and not path.begins_with("res://"):
+		txt = FileAccess.get_file_as_string("res://" + path)
+	if txt.is_empty():
+		txt = FileAccess.get_file_as_string(path)
 	if txt.is_empty():
 		push_error("city import: cannot read " + path)
 		return null
