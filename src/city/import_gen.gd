@@ -73,12 +73,29 @@ static func build(ci: CityImport, street_mat: Material = null,
 	paint.set_smooth_group(-1)
 	for ring in ci.crosswalks:
 		_cap(paint, ring, 0.13)
-	# Lane dashes on the actual carriageway: each kerb edge long enough to
-	# be a street frontage, offset OUTWARD by half the ~9 m carriageway the
-	# engine reserves between blocks (its own crosswalk emitter uses
-	# road=9), trimmed 8 m short of each corner so junctions stay clean.
-	# Facing kerbs from adjacent blocks land their dashes in the same
-	# place, which is exactly where the centerline belongs.
+	# Street hierarchy, MEASURED: the engine cuts avenues 2-4x wider than
+	# lanes (district streetW 8-30 m, aveW to 38), but painting one center
+	# dash on everything erased that. For each kerb edge, cast to the
+	# facing kerb to get the real carriageway width, then mark lanes:
+	# a narrow lane gets its center dash, an avenue gets a lane line per
+	# 3.4 m of roadway. Junction-trimmed as before.
+	var kerb_edges: Array = []
+	var edge_hash := {}
+	for ring in ci.blocks:
+		var n := (ring as PackedVector2Array).size()
+		for i in range(n):
+			var a := (ring as PackedVector2Array)[i]
+			var b := (ring as PackedVector2Array)[(i + 1) % n]
+			if (b - a).length() < 4.0:
+				continue
+			var idx := kerb_edges.size()
+			kerb_edges.append([a, b])
+			for cx in range(int(minf(a.x, b.x) / 40.0) - 1, int(maxf(a.x, b.x) / 40.0) + 2):
+				for cy in range(int(minf(a.y, b.y) / 40.0) - 1, int(maxf(a.y, b.y) / 40.0) + 2):
+					var key := "%d:%d" % [cx, cy]
+					if not edge_hash.has(key):
+						edge_hash[key] = []
+					edge_hash[key].append(idx)
 	for ring in ci.blocks:
 		var n := (ring as PackedVector2Array).size()
 		for i in range(n):
@@ -89,9 +106,26 @@ static func build(ci: CityImport, street_mat: Material = null,
 				continue
 			var dir := (b - a) / seg
 			var out := Vector2(dir.y, -dir.x)   # CCW ring: outward is right
-			var p0 := a + dir * 8.0 + out * 4.5
-			var p1 := b - dir * 8.0 + out * 4.5
-			_dashes(paint, PackedVector2Array([p0, p1]), 0.3, 2.8, 3.2, 0.10)
+			var mid := (a + b) * 0.5
+			var g := _gap_to_facing_kerb(mid, out, kerb_edges, edge_hash)
+			if g < 5.0 or g > 42.0:
+				continue   # alley or waterfront void: no paint
+			# Marking density like real streets: narrow ways get one center
+			# dash; avenues get a long-dash center divider plus one lane
+			# line per side, leaving the kerb (parking) lanes unpainted —
+			# marking every 3.4 m read as paint soup at the mid band.
+			if g < 12.0:
+				var c0 := a + dir * 8.0 + out * (g * 0.5)
+				var c1 := b - dir * 8.0 + out * (g * 0.5)
+				_dashes(paint, PackedVector2Array([c0, c1]), 0.3, 2.8, 3.2, 0.10)
+			else:
+				for off_frac: float in [0.5, 0.28, 0.72]:
+					var off := g * off_frac
+					var p0 := a + dir * 8.0 + out * off
+					var p1 := b - dir * 8.0 + out * off
+					var center: bool = off_frac == 0.5
+					_dashes(paint, PackedVector2Array([p0, p1]), 0.3,
+							7.0 if center else 2.8, 2.4 if center else 3.6, 0.10)
 	paint.generate_normals()
 	root.add_child(_mesh(paint, _mat(Color(0.62, 0.61, 0.58), 0.75)))
 
@@ -200,6 +234,35 @@ static func _cap(st: SurfaceTool, ring: PackedVector2Array, y: float) -> void:
 			var p := ring[idx[j]]
 			st.set_uv(Vector2(p.x, p.y) * 0.25)
 			st.add_vertex(Vector3(p.x, y, p.y))
+
+## Distance from a kerb point to the facing kerb across the carriageway:
+## a ray cast against nearby kerb edges through the spatial hash. Returns
+## 99.0 when nothing faces this edge within 45 m (waterfront, park side).
+static func _gap_to_facing_kerb(p: Vector2, dir: Vector2, edges: Array,
+		ehash: Dictionary) -> float:
+	var best := 99.0
+	var seen := {}
+	for step in range(0, 4):
+		var probe := p + dir * (float(step) * 30.0)
+		var key := "%d:%d" % [int(probe.x / 40.0), int(probe.y / 40.0)]
+		for idx in ehash.get(key, []):
+			if seen.has(idx):
+				continue
+			seen[idx] = true
+			var e: Array = edges[idx]
+			var t := _ray_seg(p, dir, e[0], e[1])
+			if t > 0.5 and t < best:
+				best = t
+	return best
+
+static func _ray_seg(p: Vector2, d: Vector2, a: Vector2, b: Vector2) -> float:
+	var v := b - a
+	var denom := d.x * v.y - d.y * v.x
+	if absf(denom) < 0.0001:
+		return -1.0
+	var t := ((a.x - p.x) * v.y - (a.y - p.y) * v.x) / denom
+	var s := ((a.x - p.x) * d.y - (a.y - p.y) * d.x) / denom
+	return t if s >= 0.0 and s <= 1.0 else -1.0
 
 ## Flat ribbon along a polyline (paths, lines). Both windings, like _cap.
 static func _ribbon(st: SurfaceTool, line: PackedVector2Array, w: float, y: float) -> void:
