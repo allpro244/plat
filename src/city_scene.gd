@@ -70,6 +70,7 @@ func _ready() -> void:
 	MeshBuilder.skip_props = params.get("skip_props", false)
 	if _import != null:
 		add_child(ImportGen.build(_import))
+		add_child(ContextGen.build_imported(_import, _matlib, night))
 	if _import == null and not params.get("no_block", false):
 		_build_block()
 	if _plan != null:

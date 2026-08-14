@@ -19,7 +19,21 @@ static func build(ci: CityImport) -> Node3D:
 	_cap(land, ci.coast, 0.0)
 	_skirt(land, ci.coast, 0.0, -4.0)
 	land.generate_normals()
-	root.add_child(_mesh(land, _mat(Color(0.21, 0.21, 0.215), 0.92)))
+	# Darker than the planned island's asphalt: on the imported city the
+	# land plane IS the street network (blocks sit on their own lighter
+	# plates), and at noon 0.21 reads nearly the same as the 0.36 paving —
+	# measured on the first dressed render, where the streets vanished.
+	root.add_child(_mesh(land, _mat(Color(0.145, 0.145, 0.15), 0.94)))
+
+	# The town floor (paveland) is the STREET surface: dark asphalt under
+	# the lighter block plates, which is what makes the street network read.
+	var street := SurfaceTool.new()
+	street.begin(Mesh.PRIMITIVE_TRIANGLES)
+	street.set_smooth_group(-1)
+	for ring in ci.streets:
+		_cap(street, ring, 0.06)
+	street.generate_normals()
+	root.add_child(_mesh(street, _mat(Color(0.185, 0.185, 0.19), 0.92)))
 
 	var pave := SurfaceTool.new()
 	pave.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -32,7 +46,7 @@ static func build(ci: CityImport) -> Node3D:
 		_cap(pave, ring, 0.35)
 		_skirt(pave, ring, 0.35, -3.0)
 	pave.generate_normals()
-	root.add_child(_mesh(pave, _mat(Color(0.36, 0.35, 0.33), 0.85)))
+	root.add_child(_mesh(pave, _mat(Color(0.30, 0.29, 0.27), 0.85)))
 
 	var lawn := SurfaceTool.new()
 	lawn.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -42,11 +56,10 @@ static func build(ci: CityImport) -> Node3D:
 	lawn.generate_normals()
 	root.add_child(_mesh(lawn, _mat(Color(0.30, 0.37, 0.24), 1.0)))
 
-	# Massing: prisms from z0 to z1. Slightly varied grey by the engine's
-	# tone index so adjacent volumes separate; decorative volumes (ships,
-	# cranes, sheds) darker. Vacant lots arrive with z1 == 0 and render as
-	# their outline only (a kerb-height slab), which is exactly what an
-	# undressed empty lot is.
+	# Only the volumes ContextGen.build_imported does NOT dress: vacant
+	# lots (kerb-height slabs — undressed dirt reads honestly as an empty
+	# lot) and decorative harbour scenery (ships, cranes, sheds), which
+	# have no era, class or windows to dress.
 	var masses := SurfaceTool.new()
 	masses.begin(Mesh.PRIMITIVE_TRIANGLES)
 	masses.set_smooth_group(-1)
@@ -54,12 +67,15 @@ static func build(ci: CityImport) -> Node3D:
 		var ring: PackedVector2Array = b["ring"]
 		var z1: float = b["z1"]
 		if z1 <= 0.05:
+			# Bare dirt with a hint of the lot's tone index — an empty lot,
+			# not a white void.
+			masses.set_color(Color(0.32, 0.29, 0.25) * (0.9 + 0.06 * float(int(b["tone"]) % 3)))
 			_cap(masses, ring, 0.18)
 			continue
-		var g := 0.42 + 0.05 * float(int(b["tone"]) % 5)
-		if b["deco"]:
-			g = 0.30
-		_prism_colored(masses, ring, float(b["z0"]), z1, Color(g, g, g * 1.02))
+		if not b["deco"]:
+			continue
+		masses.set_color(Color(0.30, 0.30, 0.31))
+		_prism_colored(masses, ring, float(b["z0"]), z1, Color(0.30, 0.30, 0.31))
 	masses.generate_normals()
 	var mmat := _mat(Color(1, 1, 1), 0.9)
 	mmat.vertex_color_use_as_albedo = true

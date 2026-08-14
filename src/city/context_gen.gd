@@ -76,6 +76,166 @@ static func build(seed_value: int, matlib: Dictionary, plan: CityPlan,
 		root.add_child(_flush_far(far_st))
 	return root
 
+## Dress an IMPORTED engine city (docs/ECONOMY-ADAPTER.md, Stage 3): every
+## quantity that drives form here came out of the economy engine's parcel
+## table, not a seeded roll. yearBuilt picks the era, class picks masonry
+## vs curtain wall, the district picks the palette, the footprint is the
+## engine's ring verbatim. The seeded parts that REMAIN seeded (bay jitter,
+## repaints, roof furniture) are form — the renderer's half of the line.
+static func build_imported(ci: CityImport, matlib: Dictionary,
+		night_factor: float) -> Node3D:
+	night = night_factor
+	_matlib = matlib
+	_wall_tex = matlib.get("brick_red", {})
+	var root := Node3D.new()
+	# City-wide palette family, seeded by the city's own seed; per-district
+	# tint lists derive from it so districts read as quarters of one town.
+	var crng := RandomNumberGenerator.new()
+	crng.seed = hash("family/%d" % ci.seed_value)
+	var fam: Dictionary = CityPlan.FAMILIES[CityPlan.FAMILIES.keys()[
+			crng.randi_range(0, CityPlan.FAMILIES.keys().size() - 1)]]
+	var district_p := {}
+	# Chunk the city so each mesh stays a reasonable upload; grouping by
+	# stride keeps neighbours in different chunks irrelevant — materials
+	# are per-era surfaces inside each chunk either way.
+	var chunk := 140
+	for c0 in range(0, ci.buildings.size(), chunk):
+		root.add_child(_imported_chunk(ci, c0, mini(c0 + chunk, ci.buildings.size()),
+				fam, district_p))
+	return root
+
+static func _imported_district_p(district: String, seed_value: int,
+		fam: Dictionary, cache: Dictionary) -> Dictionary:
+	if cache.has(district):
+		return cache[district]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("%d/dp/%s" % [seed_value, district])
+	var tints: Array = []
+	for base in [Color(0.58, 0.52, 0.46), Color(0.66, 0.60, 0.52),
+			Color(0.52, 0.44, 0.38), Color(0.72, 0.68, 0.62)]:
+		tints.append((base as Color) * (fam["mul"] as Color))
+	for extra in fam["extra"]:
+		tints.append(extra)
+	var p := {
+		"tints": tints,
+		"bay": rng.randf_range(1.3, 1.8),
+		"win_fx": rng.randf_range(0.5, 0.62),
+		# Lit fractions are still per-district constants; the engine does
+		# not export occupancy yet. When it does (adapter Stage 4), this
+		# is the line that starts reading it.
+		"lit": rng.randf_range(0.18, 0.45),
+		"shop_lit": rng.randf_range(0.4, 0.7),
+	}
+	cache[district] = p
+	return p
+
+static func _imported_chunk(ci: CityImport, from: int, to: int,
+		fam: Dictionary, district_p: Dictionary) -> MeshInstance3D:
+	var st := _st()
+	var st_b := _st()
+	var st_c := _st()
+	var roof := _st()
+	var tw := _st()
+	var xf := Transform3D.IDENTITY
+	var p_any: Dictionary = {}
+	for i in range(from, to):
+		var b: Dictionary = ci.buildings[i]
+		if b["deco"] or float(b["z1"]) <= 0.05:
+			continue   # scenery and vacant lots are ImportGen's problem
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("%d/imp/%s/%d" % [ci.seed_value, b["bbl"], int(b["crown"])])
+		var p := _imported_district_p(str(b["district"]), ci.seed_value, fam, district_p)
+		p_any = p
+		var ring: PackedVector2Array = b["ring"]
+		var z0: float = b["z0"]
+		var h: float = float(b["z1"]) - z0
+		var year: int = b["year"]
+		var cls: String = b["cls"]
+		# ERA FROM THE RECORD, not from a roll: the one master variable the
+		# import flips from seeded to real.
+		var era_name := "victorian" if year < 1916 else \
+				("prewar" if year < 1950 else "midcentury")
+		var tint: Color = p["tints"][rng.randi_range(0, (p["tints"] as Array).size() - 1)]
+		tint.a = clampf(float(b["z1"]) / 400.0, 0.02, 1.0)
+		_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
+		# Curtain wall: a tall office building of the glass era. Class and
+		# year are the engine's; the glazing is ours.
+		var glassy := (cls == "office" or cls == "mix") and year >= 1958 \
+				and float(b["z1"]) > 40.0
+		var sti: SurfaceTool = tw if glassy else \
+				(st if era_name == "victorian" else (st_b if era_name == "prewar" else st_c))
+		sti.set_color(Color(1, 1, 1) if glassy else tint)
+		_ring_walls(sti, ring, z0, h)
+		_ring_cap(sti, ring, z0 + h, tint if not glassy else Color(1, 1, 1))
+		# Roof furniture only on near-rectangular main volumes: parapet
+		# boxes follow the bounding box, and on an L-plan they would float.
+		if not b["crown"] and z0 < 0.5:
+			var bb := _ring_bbox(ring)
+			var bba: float = bb.size.x * bb.size.y
+			if bba > 30.0 and absf(CityImport._shoelace(ring)) / bba > 0.72:
+				_roofscape(roof, rng, [bb.position.x, bb.position.y,
+						bb.size.x, bb.size.y, z0 + h], xf)
+	var mi := MeshInstance3D.new()
+	var mesh := ArrayMesh.new()
+	var rng2 := RandomNumberGenerator.new()
+	rng2.seed = hash("%d/impmat/%d" % [ci.seed_value, from])
+	if p_any.is_empty():
+		p_any = {"bay": 1.5, "win_fx": 0.55, "lit": 0.25, "shop_lit": 0.5}
+	var mats: Array = []
+	for entry in [[st, "victorian", true], [roof, null, false],
+			[st_b, "prewar", true], [st_c, "midcentury", true], [tw, "tower", true]]:
+		var stool: SurfaceTool = entry[0]
+		var arr: Array = stool.commit_to_arrays()
+		var verts = arr[Mesh.ARRAY_VERTEX]
+		if not (verts is PackedVector3Array) or (verts as PackedVector3Array).is_empty():
+			continue
+		stool.generate_normals()
+		if entry[2]:
+			stool.generate_tangents()
+		stool.commit(mesh)
+		if entry[1] == null:
+			mats.append(_roof_material())
+		elif entry[1] == "tower":
+			mats.append(_tower_material(rng2))
+		else:
+			var em := _facade_material(rng2, p_any)
+			_apply_era(em, ERAS[entry[1]], rng2)
+			mats.append(em)
+	mi.mesh = mesh
+	for i in range(mats.size()):
+		mi.set_surface_override_material(i, mats[i])
+	return mi
+
+## Walls along an arbitrary CCW footprint, through the same _wall emitter
+## the planned city uses — meter UVs, UV2 identity, vertex tint.
+static func _ring_walls(st: SurfaceTool, ring: PackedVector2Array,
+		z0: float, h: float) -> void:
+	for i in range(ring.size()):
+		var a := ring[i]
+		var b := ring[(i + 1) % ring.size()]
+		_wall(st, Transform3D.IDENTITY, Vector3(b.x, z0, b.y), Vector3(a.x, z0, a.y), h)
+
+## Triangulated cap (concave-safe), both windings so orientation quirks in
+## source rings can never delete a roof.
+static func _ring_cap(st: SurfaceTool, ring: PackedVector2Array, y: float,
+		tint: Color) -> void:
+	var idx := Geometry2D.triangulate_polygon(ring)
+	if idx.is_empty():
+		return
+	st.set_color(tint)
+	for t in range(0, idx.size(), 3):
+		for j in [t + 2, t + 1, t, t, t + 1, t + 2]:
+			var p := ring[idx[j]]
+			st.set_uv(Vector2(p.x, p.y))
+			st.set_uv2(_uv2)
+			st.add_vertex(Vector3(p.x, y, p.y))
+
+static func _ring_bbox(ring: PackedVector2Array) -> Rect2:
+	var r := Rect2(ring[0], Vector2.ZERO)
+	for p in ring:
+		r = r.expand(p)
+	return r
+
 # --- shared -----------------------------------------------------------------
 
 static func _st() -> SurfaceTool:

@@ -17,7 +17,8 @@ const R := 6378137.0
 var name := "?"
 var seed_value := 0
 var coast := PackedVector2Array()          # world-metre ring
-var pavements: Array = []                  # paved rings (sidewalk polygons)
+var pavements: Array = []                  # paved rings (sidewalk/block plates)
+var streets: Array = []                    # paveland: the street-level town floor
 var parks: Array = []                      # park lawn rings
 var piers: Array = []
 var esplanade: Array = []
@@ -67,20 +68,38 @@ static func load_city(path: String) -> CityImport:
 		var geom: Dictionary = f["geometry"]
 		if str(geom.get("type", "")) != "Polygon":
 			continue
-		var ring := _ring((geom["coordinates"] as Array)[0], proj)
-		if ring.size() < 3:
+		# A GeoJSON polygon's rings beyond the first are HOLES — the
+		# esplanade is an annulus, and filling its outer ring alone
+		# blanketed the whole island (that was the render where the
+		# streets vanished). Subtract holes before anything is filled.
+		var rings := _polys(geom["coordinates"] as Array, proj)
+		if rings.is_empty():
 			continue
 		match str(props.get("kind", "")):
-			"pavement", "paveland", "apron": ci.pavements.append(ring)
-			"park": ci.parks.append(ring)
-			"pier": ci.piers.append(ring)
-			"esplanade": ci.esplanade.append(ring)
+			"pavement", "apron", "block": ci.pavements.append_array(rings)
+			"paveland": ci.streets.append_array(rings)
+			"park": ci.parks.append_array(rings)
+			"pier": ci.piers.append_array(rings)
+			# esplanade is deliberately NOT filled: it is an annulus, and
+			# Geometry2D.clip_polygons represents the result as outer+hole
+			# rings which a naive fill paints as two blankets over the whole
+			# island (measured: 2.8M m2 across two "polygons" on a 1.46M m2
+			# island). The coast band already reads via land + street floor;
+			# a real promenade treatment is later dressing work.
 
+	var parcels: Dictionary = doc.get("parcels", {})
 	for b in (doc["buildings3d"] as Array):
 		var ring := _ring(b["r"], proj)
 		if ring.size() < 3:
 			continue
+		# Normalize to CCW in the (x, z) plane (positive shoelace), the
+		# orientation every wall emitter in this repo assumes.
+		if _shoelace(ring) < 0.0:
+			ring.reverse()
+		var bbl := str(b.get("b", ""))
+		var par: Dictionary = parcels.get(bbl, {})
 		ci.buildings.append({
+			"bbl": bbl,
 			"ring": ring,
 			"z0": float(b.get("z0", 0.0)),
 			"z1": float(b.get("z1", 0.0)),
@@ -89,10 +108,48 @@ static func load_city(path: String) -> CityImport:
 			"year": int(b.get("y", 0)),
 			"tone": int(b.get("t", 0)),
 			"deco": int(b.get("d", 0)) == 1,
+			"crown": int(b.get("x", 0)) == 1,
+			"district": str(par.get("district", "?")),
+			"demand": float(par.get("demandScore", 0.0)),
 		})
+	var esp_m2 := 0.0
+	for r in ci.esplanade:
+		esp_m2 += absf(_shoelace(r))
 	print("[plat] imported %s seed=%d: %d building volumes, coast r<=%.0f m"
 			% [ci.name, ci.seed_value, ci.buildings.size(), ci.radius_max])
+	print("[plat] import layers: %d street, %d pave, %d esplanade (%.0f m2), %d park, %d pier"
+			% [ci.streets.size(), ci.pavements.size(), ci.esplanade.size(), esp_m2,
+			ci.parks.size(), ci.piers.size()])
 	return ci
+
+## All rings of one GeoJSON polygon, holes subtracted (clip returns the
+## remainder as simple polygons Geometry2D can triangulate).
+static func _polys(coords: Array, proj: Callable) -> Array:
+	var outer := _ring(coords[0], proj)
+	if outer.size() < 3:
+		return []
+	var result: Array = [outer]
+	for h in range(1, coords.size()):
+		var hole := _ring(coords[h], proj)
+		if hole.size() < 3:
+			continue
+		var next: Array = []
+		for poly in result:
+			for clipped in Geometry2D.clip_polygons(poly, hole):
+				# clip_polygons expresses ring-with-hole results as an
+				# extra CLOCKWISE polygon; filling one paints the hole.
+				if not Geometry2D.is_polygon_clockwise(clipped):
+					next.append(clipped)
+		result = next
+	return result
+
+static func _shoelace(ring: PackedVector2Array) -> float:
+	var s := 0.0
+	for i in range(ring.size()):
+		var a := ring[i]
+		var b := ring[(i + 1) % ring.size()]
+		s += a.x * b.y - b.x * a.y
+	return s * 0.5
 
 static func _ring(ll: Array, proj: Callable) -> PackedVector2Array:
 	var out := PackedVector2Array()
