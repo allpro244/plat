@@ -93,6 +93,8 @@ func _parse_args() -> Dictionary:
 				p["skip_props"] = val == "off"
 			"ground":
 				p["skip_ground"] = val == "off"
+			"city":
+				p["city"] = val
 			_:
 				printerr("[plat] unknown arg --", key)
 	return p

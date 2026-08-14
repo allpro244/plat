@@ -18,6 +18,7 @@ var sun_info: Dictionary
 var sky_sun_delta_deg := 0.0
 var _matlib := {}
 var _plan: CityPlan = null
+var _import: CityImport = null
 
 static func defaults() -> Dictionary:
 	return {
@@ -50,10 +51,16 @@ func _ready() -> void:
 	_build_sun()
 	# The plan must exist before the ground: the island's coastline IS the
 	# plan's lobed city limit. Diagnostic no-context runs keep a flat slab.
-	if not params.get("no_context", false):
+	# An imported city (docs/ECONOMY-ADAPTER.md) replaces the plan wholesale:
+	# the engine already decided the coast, the parcels and the heights, so
+	# nothing here may invent them. ImportGen builds its own ground and water.
+	if params.get("city", ""):
+		_import = CityImport.load_city(str(params["city"]))
+	if _import == null and not params.get("no_context", false):
 		_plan = CityPlan.new(int(params["seed"]))
 		print("[plat] ", _plan.describe())
-	_build_ground()
+	if _import == null:
+		_build_ground()
 	# Dusk factor from the sun the environment just derived: fades in below
 	# 14 deg elevation, full by 4 deg. Drives lit windows everywhere.
 	var night: float = clampf((14.0 - float(sun_info["elevation_deg"])) / 10.0, 0.0, 1.0)
@@ -61,7 +68,9 @@ func _ready() -> void:
 	MeshBuilder.plain_materials = params.get("plain_mats", false)
 	MeshBuilder.skip_windows = params.get("skip_windows", false)
 	MeshBuilder.skip_props = params.get("skip_props", false)
-	if not params.get("no_block", false):
+	if _import != null:
+		add_child(ImportGen.build(_import))
+	if _import == null and not params.get("no_block", false):
 		_build_block()
 	if _plan != null:
 		add_child(ContextGen.build(int(params["seed"]), _matlib, _plan, night))

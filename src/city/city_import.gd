@@ -1,0 +1,104 @@
+class_name CityImport
+extends RefCounted
+## Loads a `plat-city/1` export from the economy engine (plat-econ,
+## tools/export-city.mjs) and re-projects it into the world-metre frame the
+## renderer works in. See docs/ECONOMY-ADAPTER.md: the engine owns the
+## quantities in this file; nothing in here invents one.
+##
+## Projection matches the engine's makeProjection: equirectangular about a
+## local origin, R = 6378137 (the engine's constant). The origin is the mean
+## of the coast ring, so the imported city is centred near world (0, 0) like
+## a planned one. Engine +y is north; Godot's ground plane is (x, z) with a
+## flipped handedness, so north maps to -z — that keeps ring orientation
+## (CCW in engine XY stays CCW seen from above in Godot).
+
+const R := 6378137.0
+
+var name := "?"
+var seed_value := 0
+var coast := PackedVector2Array()          # world-metre ring
+var pavements: Array = []                  # paved rings (sidewalk polygons)
+var parks: Array = []                      # park lawn rings
+var piers: Array = []
+var esplanade: Array = []
+var buildings: Array = []                  # {ring, z0, z1, cls, floors, year, tone, deco}
+var radius_max := 0.0                      # coast bounding radius, for the camera clamp
+
+static func load_city(path: String) -> CityImport:
+	var txt := FileAccess.get_file_as_string(path)
+	if txt.is_empty():
+		push_error("city import: cannot read " + path)
+		return null
+	var doc: Variant = JSON.parse_string(txt)
+	if not (doc is Dictionary) or str(doc.get("format", "")) != "plat-city/1":
+		push_error("city import: not a plat-city/1 file: " + path)
+		return null
+	var ci := CityImport.new()
+	ci.name = str(doc.get("name", "?"))
+	ci.seed_value = int(doc.get("seed", 0))
+
+	# Projection origin: mean of the coast ring's lon/lat.
+	var land_ll: Array = []
+	for f in (doc["context"]["features"] as Array):
+		var kind := str((f["properties"] as Dictionary).get("kind", ""))
+		if kind == "land":
+			land_ll = (f["geometry"]["coordinates"] as Array)[0]
+			break
+	if land_ll.is_empty():
+		push_error("city import: no land ring in " + path)
+		return null
+	var lon0 := 0.0
+	var lat0 := 0.0
+	for p in land_ll:
+		lon0 += float(p[0]) / land_ll.size()
+		lat0 += float(p[1]) / land_ll.size()
+	var kx := deg_to_rad(1.0) * R * cos(deg_to_rad(lat0))
+	var ky := deg_to_rad(1.0) * R
+	var proj := func(p: Array) -> Vector2:
+		# north (+y in the engine) -> -z in Godot; see header.
+		return Vector2((float(p[0]) - lon0) * kx, -(float(p[1]) - lat0) * ky)
+
+	ci.coast = _ring(land_ll, proj)
+	for p in ci.coast:
+		ci.radius_max = maxf(ci.radius_max, p.length())
+
+	for f in (doc["context"]["features"] as Array):
+		var props: Dictionary = f["properties"]
+		var geom: Dictionary = f["geometry"]
+		if str(geom.get("type", "")) != "Polygon":
+			continue
+		var ring := _ring((geom["coordinates"] as Array)[0], proj)
+		if ring.size() < 3:
+			continue
+		match str(props.get("kind", "")):
+			"pavement", "paveland", "apron": ci.pavements.append(ring)
+			"park": ci.parks.append(ring)
+			"pier": ci.piers.append(ring)
+			"esplanade": ci.esplanade.append(ring)
+
+	for b in (doc["buildings3d"] as Array):
+		var ring := _ring(b["r"], proj)
+		if ring.size() < 3:
+			continue
+		ci.buildings.append({
+			"ring": ring,
+			"z0": float(b.get("z0", 0.0)),
+			"z1": float(b.get("z1", 0.0)),
+			"cls": str(b.get("c", "?")),
+			"floors": int(b.get("f", 0)),
+			"year": int(b.get("y", 0)),
+			"tone": int(b.get("t", 0)),
+			"deco": int(b.get("d", 0)) == 1,
+		})
+	print("[plat] imported %s seed=%d: %d building volumes, coast r<=%.0f m"
+			% [ci.name, ci.seed_value, ci.buildings.size(), ci.radius_max])
+	return ci
+
+static func _ring(ll: Array, proj: Callable) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for p in ll:
+		out.append(proj.call(p))
+	# GeoJSON rings repeat the first point last; drop the duplicate.
+	if out.size() > 1 and out[0].distance_to(out[out.size() - 1]) < 0.01:
+		out.remove_at(out.size() - 1)
+	return out
