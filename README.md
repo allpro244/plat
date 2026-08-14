@@ -57,8 +57,26 @@ The camera is deliberately **orbital and band-clamped**, in play exactly as in
 the headless shots: no free-fly. That contract is what makes interiors,
 facade LOD, and baked ground relationships tractable (see `CLAUDE.md`).
 
-There is no economy yet — this is the city generator and renderer. Buildings
-are scenery, not yet assets with rents.
+## The economy
+
+The simulation lives in its own repository —
+[plat-econ](https://github.com/allpro244/plat-econ), the Broadway-and-Wall
+engine ported headless, its gate harnesses green in CI — and the two meet
+through one file (`docs/ECONOMY-ADAPTER.md`):
+
+```sh
+# in plat-econ: a whole city from a seed, quantities only
+node tools/export-city.mjs --seed=1928 --out=city.json   # --density=landing…metropolis
+
+# in plat: render it, or play it
+tools/shoot.sh --city=city.json
+godot --path . -- --city=city.json
+```
+
+The engine decides the coast, parcels, classes, years and heights; plat
+decides what that looks like — eras from `yearBuilt`, curtain wall vs masonry
+from class, palettes by district, the engine's own trees, crosswalks and
+parks. Seeded plat cities (no `--city`) remain the renderer's own testbed.
 
 ## Rendering headless
 

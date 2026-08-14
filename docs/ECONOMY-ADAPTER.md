@@ -62,18 +62,23 @@ camera — form, all of it.
 ## Staged migration
 
 1. **Export (done).** plat-econ writes `city.json`; deterministic, verified.
-2. **Ingest.** plat gains a loader: `tools/shoot.sh --city=city.json` builds
-   the scene from the file instead of `CityPlan`. First target: massing only —
-   every `buildings3d` record becomes a correctly placed, correctly tall grey
-   mass on the engine's coast. Rendered and compared against the engine's own
-   2D tile output for agreement of silhouette.
-3. **Dress.** Wire the mapping table above into `ContextGen` so the era,
-   palette, and typology systems read engine quantities. `CityPlan` shrinks to
-   a fallback for `--seed=` runs with no city file.
-4. **Live loop (later).** The exporter's static file becomes a message: the
+2. **Ingest (done).** `tools/shoot.sh --city=city.json` builds the scene from
+   the file instead of `CityPlan`: coast, street floor, block plates, and one
+   correctly placed mass per `buildings3d` record.
+3. **Dress (done).** `ContextGen.build_imported` reads the engine quantities:
+   era from `yearBuilt`, curtain wall from class+year+height, palettes by
+   district, cornices and roofscape by era, the engine's trees / crosswalks /
+   centerlines / parks / ponds drawn, dusk windows lighting by district. The
+   development dial is proven through the adapter (landing vs metropolis of
+   the same seed, committed renders). Imported cities are playable
+   (`godot --path . -- --city=…`) under the same banded rig. `CityPlan`
+   remains the generator for `--seed=` runs with no city file.
+4. **Live loop (next).** The exporter's static file becomes a message: the
    running sim streams parcel-state deltas (occupancy, condition, construction)
    and plat re-dresses only what changed. Format unchanged — `plat-city/1`
-   records, sent incrementally.
+   records, sent incrementally. First slice: export per-parcel occupancy and
+   replace the per-district lit-fraction constants in
+   `_imported_district_p` (the marked line).
 
 The practical test stays what CLAUDE.md says it is: the engine passes its full
 gate with the renderer deleted (it does, in CI, today), and plat renders a
