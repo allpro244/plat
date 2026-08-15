@@ -129,7 +129,14 @@ func _ready() -> void:
 	_build_nav_widget(layer)
 	_hud.text = "generating city..."
 	await get_tree().process_frame
-	_rebuild()
+	await _rebuild()
+	# Shipped zip with plat-econ beside the exe: start the game without F1.
+	if _should_auto_start_campaign():
+		await _break_ground()
+
+func _should_auto_start_campaign() -> bool:
+	return not _selftest and _campaign_dir == "" and not Engine.is_editor_hint() \
+			and _resolve_runner() != ""
 
 ## MapLibre NavigationControl analogue: compass resets bearing; +/− zoom.
 func _build_nav_widget(layer: CanvasLayer) -> void:
@@ -312,8 +319,10 @@ func _bootstrap_selftest_campaign() -> void:
 		return
 	var dir := ProjectSettings.globalize_path("user://campaigns/selftest")
 	var out := []
-	var code := OS.execute("node", [runner, "new", "--dir=" + dir,
-			"--seed=1928"], out, true)
+	var ran: Array = _run_sim(PackedStringArray([runner, "new", "--dir=" + dir,
+			"--seed=1928"]))
+	var code: int = ran[0]
+	out = ran[1]
 	print("[plat] selftest campaign new: code=%d %s" % [code, "".join(out).right(400)])
 	if code != 0:
 		return
@@ -505,8 +514,10 @@ func _advance_campaign(months: int) -> void:
 	if runner == "" or not FileAccess.file_exists(runner):
 		runner = _resolve_runner()
 	var out := []
-	var code := OS.execute("node", [runner, "advance", "--dir=" + _campaign_dir,
-			"--months=%d" % months], out, true)
+	var ran: Array = _run_sim(PackedStringArray([runner, "advance", "--dir=" + _campaign_dir,
+			"--months=%d" % months]))
+	var code: int = ran[0]
+	out = ran[1]
 	_busy = false
 	if code != 0 or runner == "":
 		_hud.text = "advance FAILED (%d): %s" % [code, "".join(out).right(200)]
@@ -595,14 +606,45 @@ static func _fmt_sf(v: float) -> String:
 	return s + out
 
 ## Where the simulation lives: the plat-sim sidecar next to the executable,
-## a PLAT_SIM env override, or the dev repo. Empty string = no sim available.
+## plat-econ shipped beside the exe, PLAT_SIM, a dev checkout, or nothing.
+func _sim_bin() -> String:
+	var exe_dir := OS.get_executable_path().get_base_dir()
+	if OS.get_name() == "Windows":
+		for rel in ["node.exe", "node/node.exe"]:
+			var p := exe_dir.path_join(rel)
+			if FileAccess.file_exists(p):
+				return p
+	else:
+		for rel in ["node", "node/bin/node"]:
+			var p := exe_dir.path_join(rel)
+			if FileAccess.file_exists(p):
+				return p
+	return "node"
+
+func _run_sim(args: PackedStringArray) -> Array:
+	var out := []
+	var code := OS.execute(_sim_bin(), args, out, true)
+	return [code, out]
+
 func _resolve_runner() -> String:
-	var beside := OS.get_executable_path().get_base_dir() + "/plat-sim.mjs"
-	if FileAccess.file_exists(beside):
-		return beside
+	var exe_dir := OS.get_executable_path().get_base_dir()
+	var beside_sim := exe_dir.path_join("plat-sim.mjs")
+	if FileAccess.file_exists(beside_sim):
+		return beside_sim
+	var bundled := exe_dir.path_join("plat-econ/tools/game-server.mjs")
+	if FileAccess.file_exists(bundled):
+		return bundled
 	var env := OS.get_environment("PLAT_SIM")
 	if env != "" and FileAccess.file_exists(env):
 		return env
+	var root := ProjectSettings.globalize_path("res://")
+	for rel in [
+			"../plat-econ/tools/game-server.mjs",
+			"plat-econ/tools/game-server.mjs",
+	]:
+		var p := root.path_join(rel).simplify_path()
+		if FileAccess.file_exists(p):
+			return p
 	var dev := "/workspace/plat-econ/tools/game-server.mjs"
 	return dev if FileAccess.file_exists(dev) else ""
 
@@ -622,8 +664,10 @@ func _break_ground() -> void:
 	await get_tree().process_frame
 	var dir := ProjectSettings.globalize_path("user://campaigns/c%d" % (randi() % 1000000))
 	var out := []
-	var code := OS.execute("node", [runner, "new", "--dir=" + dir,
-			"--seed=%d" % (randi() % 100000)], out, true)
+	var ran: Array = _run_sim(PackedStringArray([runner, "new", "--dir=" + dir,
+			"--seed=%d" % (randi() % 100000)]))
+	var code: int = ran[0]
+	out = ran[1]
 	_busy = false
 	if code != 0:
 		_card.text = "break ground FAILED\n" + "".join(out).right(200)
@@ -655,8 +699,10 @@ func _buy_selected() -> void:
 	if runner == "" or not FileAccess.file_exists(runner):
 		runner = _resolve_runner()
 	var out := []
-	var code := OS.execute("node", [runner, "buy", "--dir=" + _campaign_dir,
-			"--bbl=" + bbl], out, true)
+	var ran: Array = _run_sim(PackedStringArray([runner, "buy", "--dir=" + _campaign_dir,
+			"--bbl=" + bbl]))
+	var code: int = ran[0]
+	out = ran[1]
 	_busy = false
 	if code != 0:
 		var res: Variant = JSON.parse_string(
