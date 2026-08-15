@@ -63,16 +63,33 @@ static func _ensure_fonts() -> void:
 	_sans = u
 
 
+## Godot StyleBoxFlat has one shadow. These sizes are the ambient half of
+## `--lift-1/2/3` in plat-econ/src/index.css (tight contact + wide wash).
+## The top-edge hairline is drawn as a ColorRect on the page sheet.
+static func _lift(s: StyleBoxFlat, level: int) -> void:
+	var ink := Color(48.0 / 255.0, 38.0 / 255.0, 16.0 / 255.0, 1.0)
+	match level:
+		1:
+			s.shadow_color = Color(ink.r, ink.g, ink.b, 0.16)
+			s.shadow_size = 8
+			s.shadow_offset = Vector2(0, 2)
+		2:
+			s.shadow_color = Color(ink.r, ink.g, ink.b, 0.20)
+			s.shadow_size = 18
+			s.shadow_offset = Vector2(0, 6)
+		_:
+			s.shadow_color = Color(ink.r, ink.g, ink.b, 0.28)
+			s.shadow_size = 36
+			s.shadow_offset = Vector2(0, 14)
+
+
 static func panel_bg(alpha: float = 0.94) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = Color(PAPER.r, PAPER.g, PAPER.b, alpha)
 	s.border_color = CARD_LINE
 	s.set_border_width_all(1)
 	s.set_corner_radius_all(10)
-	s.shadow_color = Color(0.188, 0.149, 0.063, 0.28)
-	s.shadow_size = 22
-	s.shadow_offset = Vector2(0, 8)
-	s.border_width_top = 1
+	_lift(s, 2)
 	return s
 
 
@@ -81,9 +98,7 @@ static func topbar_bg() -> StyleBoxFlat:
 	s.bg_color = Color(0.973, 0.957, 0.910, 0.90)
 	s.border_color = Color(0.471, 0.361, 0.149, 0.22)
 	s.border_width_bottom = 1
-	s.shadow_color = Color(0.188, 0.149, 0.063, 0.10)
-	s.shadow_size = 12
-	s.shadow_offset = Vector2(0, 4)
+	_lift(s, 1)
 	return s
 
 
@@ -162,10 +177,11 @@ static func page_sheet() -> StyleBoxFlat:
 	s.border_color = CARD_LINE
 	s.set_border_width_all(1)
 	s.set_corner_radius_all(10)
-	s.shadow_color = Color(0.188, 0.149, 0.063, 0.28)
-	s.shadow_size = 28
-	s.shadow_offset = Vector2(0, 10)
+	_lift(s, 3)
 	return s
+
+
+const HAIRLINE := Color(1.0, 0.988, 0.949, 0.75)
 
 
 static func start_opt(on: bool) -> StyleBoxFlat:

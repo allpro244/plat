@@ -64,6 +64,12 @@ var _parcel_data: Dictionary = {}
 var _campaign := false
 var _page_name := ""
 var _lenses: Dictionary = {}
+var _market_rows: Array = []
+var _market_cls := "all"
+var _prop_tab := "overview"
+var _prop_building: Dictionary = {}
+var _prop_options: Array = []
+var _prop_quotes: Array = []
 
 
 func _ready() -> void:
@@ -151,6 +157,7 @@ func _build_topbar() -> void:
 	_stat("For sale", "listings", 64)
 
 	_fps_label = Label.new()
+	_fps_label.visible = false
 	BwTheme.style_label(_fps_label, 11, true, true)
 	row1.add_child(_fps_label)
 
@@ -345,10 +352,10 @@ func _build_parcel() -> void:
 	body.add_child(_accept_btn)
 	_build_btn = _lens("Build…", false)
 	_build_btn.visible = false
-	_build_btn.pressed.connect(func() -> void: open_page("property"))
+	_build_btn.pressed.connect(func() -> void: open_page("property", "build"))
 	body.add_child(_build_btn)
 	_full_btn = _lens("Full view", false)
-	_full_btn.pressed.connect(func() -> void: open_page("property"))
+	_full_btn.pressed.connect(func() -> void: open_page("property", "overview"))
 	body.add_child(_full_btn)
 
 
@@ -374,6 +381,15 @@ func _build_page() -> void:
 	sheet.add_theme_stylebox_override("panel", BwTheme.page_sheet())
 	sheet.mouse_filter = Control.MOUSE_FILTER_STOP
 	_page.add_child(sheet)
+	var hair := ColorRect.new()
+	hair.color = BwTheme.HAIRLINE
+	hair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hair.set_anchors_preset(PRESET_TOP_WIDE)
+	hair.offset_left = 10
+	hair.offset_right = -10
+	hair.offset_top = 1
+	hair.offset_bottom = 2
+	sheet.add_child(hair)
 	var pad := MarginContainer.new()
 	pad.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	pad.add_theme_constant_override("margin_left", 28)
@@ -621,7 +637,12 @@ func show_error(title: String, detail: String) -> void:
 	_build_btn.visible = false
 
 
-func open_page(page: String) -> void:
+func open_page(page: String, tab: String = "") -> void:
+	if page == "property":
+		if tab != "":
+			_prop_tab = tab
+		elif _page_name != "property":
+			_prop_tab = "overview"
 	_page_name = page
 	_page.visible = true
 	var meta := _page_meta(page)
@@ -645,20 +666,75 @@ func current_page() -> String:
 
 
 func set_market_rows(rows: Array) -> void:
+	_market_rows = rows
+	_paint_market()
+
+
+func _paint_market() -> void:
 	_clear(_page_body)
 	_add_room_nav("market")
-	if rows.is_empty():
+	if _market_rows.is_empty():
 		_note("No listings on the tape this month.")
 		return
-	_table_head(["Address", "Class", "Sf", "Ask", "Occ"])
-	for r in rows:
+	var motivated := 0
+	var classes: Dictionary = {}
+	for r in _market_rows:
+		if int(r.get("distress", 0)) == 1:
+			motivated += 1
+		var c := str(r.get("cls", ""))
+		classes[c] = int(classes.get(c, 0)) + 1
+	_stat_strip([
+		["On the market", str(_market_rows.size())],
+		["Motivated", str(motivated)],
+	])
+	var filters := HBoxContainer.new()
+	filters.add_theme_constant_override("separation", 6)
+	_page_body.add_child(filters)
+	var all_b := _lens("All · %d" % _market_rows.size(), _market_cls == "all")
+	all_b.pressed.connect(func() -> void:
+		_market_cls = "all"
+		_paint_market())
+	filters.add_child(all_b)
+	for c in ["land", "office", "retail", "multifamily", "industrial"]:
+		if not classes.has(c):
+			continue
+		var id := c
+		var b := _lens("%s · %d" % [c, int(classes[c])], _market_cls == id)
+		b.pressed.connect(func() -> void:
+			_market_cls = id
+			_paint_market())
+		filters.add_child(b)
+	var hl := _lens("Highlight on map", bool(_lenses.get("listings", false)))
+	hl.pressed.connect(func() -> void:
+		var on := not bool(_lenses.get("listings", false))
+		_lenses["listings"] = on
+		if _lens_btns.has("listings"):
+			_style_btn(_lens_btns["listings"], on, false)
+		lens_pressed.emit("listings", on)
+		_paint_market())
+	filters.add_child(hl)
+	_note("On-market listings. Click a row to put it on the card.")
+	_sheet_head([
+		["Address", 0, false], ["Class", 110, false], ["Sf", 80, true],
+		["Ask", 88, true], ["Occ", 56, true],
+	])
+	var shown := 0
+	for r in _market_rows:
+		var cls := str(r.get("cls", ""))
+		if _market_cls != "all" and cls != _market_cls:
+			continue
+		shown += 1
 		var occ = r.get("occ")
 		var occ_s := "—" if occ == null else "%.0f%%" % (float(occ) * 100.0)
-		var line := "%s    %s    %s    %s    %s" % [
-				str(r.get("address", r.get("bbl", "?"))),
-				str(r.get("cls", "")), _fmt_sf(float(r.get("sf", 0))),
-				_usd(float(r.get("ask", 0))), occ_s]
-		_row_btn(line, str(r.get("bbl", "")), true)
+		_sheet_row([
+			[str(r.get("address", r.get("bbl", "?"))), 0, false],
+			[cls, 110, false],
+			[_fmt_sf(float(r.get("sf", 0))), 80, true],
+			[_usd(float(r.get("ask", 0))), 88, true],
+			[occ_s, 56, true],
+		], str(r.get("bbl", "")), true)
+	if shown == 0:
+		_note("Nothing in that class this month.")
 
 
 func set_portfolio(doc: Dictionary) -> void:
@@ -679,15 +755,21 @@ func set_portfolio(doc: Dictionary) -> void:
 		["Debt", _usd(float(tot.get("debt", 0)))],
 		["Equity", _usd(float(tot.get("equity", 0)))],
 	])
-	_table_head(["Address", "Class", "Sf", "Occ", "NOI", "Value"])
+	_sheet_head([
+		["Address", 0, false], ["Class", 110, false], ["Sf", 80, true],
+		["Occ", 56, true], ["NOI", 88, true], ["Value", 88, true],
+	])
 	for r in rows:
 		var occ = r.get("occ")
 		var occ_s := "—" if occ == null else "%.0f%%" % (float(occ) * 100.0)
-		var line := "%s    %s    %s    %s    %s    %s" % [
-				str(r.get("address", r.get("bbl", "?"))),
-				str(r.get("cls", "")), _fmt_sf(float(r.get("sf", 0))),
-				occ_s, _usd(float(r.get("noi", 0))), _usd(float(r.get("value", 0)))]
-		_row_btn(line, str(r.get("bbl", "")), false)
+		_sheet_row([
+			[str(r.get("address", r.get("bbl", "?"))), 0, false],
+			[str(r.get("cls", "")), 110, false],
+			[_fmt_sf(float(r.get("sf", 0))), 80, true],
+			[occ_s, 56, true],
+			[_usd(float(r.get("noi", 0))), 88, true],
+			[_usd(float(r.get("value", 0))), 88, true],
+		], str(r.get("bbl", "")), false)
 
 
 func set_news(doc: Dictionary) -> void:
@@ -755,18 +837,20 @@ func set_economy(doc: Dictionary) -> void:
 		ch.text = "SPACE MARKETS"
 		BwTheme.style_label(ch, 10, false, true)
 		_page_body.add_child(ch)
-		_table_head(["Class", "Vacancy", "Rent idx", "Cap"])
+		_sheet_head([
+			["Class", 0, false], ["Vacancy", 88, true],
+			["Rent idx", 88, true], ["Cap", 72, true],
+		])
 		for k in ["office", "retail", "multifamily", "industrial"]:
 			if not classes.has(k):
 				continue
 			var c: Dictionary = classes[k]
-			var line := "%s    %s    %s    %s" % [
-					k, _pct(c.get("vac"), 1, true),
-					_num(c.get("rent"), 2), _pct(c.get("cap"), 2)]
-			var lab := Label.new()
-			lab.text = line
-			BwTheme.style_label(lab, 13, true)
-			_page_body.add_child(lab)
+			_sheet_row([
+				[k, 0, false],
+				[_pct(c.get("vac"), 1, true), 88, true],
+				[_num(c.get("rent"), 2), 88, true],
+				[_pct(c.get("cap"), 2), 72, true],
+			])
 
 
 func set_debt(doc: Dictionary) -> void:
@@ -801,15 +885,19 @@ func set_debt(doc: Dictionary) -> void:
 	if loans.is_empty():
 		_note("No mortgages on the book. The line is the only paper.")
 		return
-	_table_head(["Address", "Kind", "Balance", "Rate", "Due"])
+	_sheet_head([
+		["Address", 0, false], ["Kind", 88, false], ["Balance", 88, true],
+		["Rate", 64, true], ["Due", 88, false],
+	])
 	for r in loans:
 		var rate = r.get("rate")
-		var line := "%s    %s    %s    %s    %s" % [
-				str(r.get("address", "—")), str(r.get("kind", "")),
-				_usd(float(r.get("balance", 0))),
-				"—" if rate == null else "%.2f%%" % float(rate),
-				str(r.get("maturity", "—"))]
-		_row_btn(line, str(r.get("bbl", "")), false)
+		_sheet_row([
+			[str(r.get("address", "—")), 0, false],
+			[str(r.get("kind", "")), 88, false],
+			[_usd(float(r.get("balance", 0))), 88, true],
+			["—" if rate == null else "%.2f%%" % float(rate), 64, true],
+			[str(r.get("maturity", "—")), 88, false],
+		], str(r.get("bbl", "")), false)
 
 
 func set_books(doc: Dictionary) -> void:
@@ -826,24 +914,60 @@ func set_books(doc: Dictionary) -> void:
 	if years.is_empty():
 		_note("The ledger is empty. Buy something, then Advance.")
 		return
-	_table_head(["Year", "NOI", "Debt svc", "Bought", "Sold", "Tax"])
+	_sheet_head([
+		["Year", 72, false], ["NOI", 88, true], ["Debt svc", 88, true],
+		["Bought", 88, true], ["Sold", 88, true], ["Tax", 72, true],
+	])
 	for y in years:
-		var lab := Label.new()
-		lab.text = "%s    %s    %s    %s    %s    %s" % [
-				str(y.get("when", y.get("yr", "?"))),
-				_usd(float(y.get("noi", 0))), _usd(float(y.get("debtSvc", 0))),
-				_usd(float(y.get("bought", 0))), _usd(float(y.get("sold", 0))),
-				_usd(float(y.get("taxes", 0)))]
-		BwTheme.style_label(lab, 13, true)
-		_page_body.add_child(lab)
+		_sheet_row([
+			[str(y.get("when", y.get("yr", "?"))), 72, false],
+			[_usd(float(y.get("noi", 0))), 88, true],
+			[_usd(float(y.get("debtSvc", 0))), 88, true],
+			[_usd(float(y.get("bought", 0))), 88, true],
+			[_usd(float(y.get("sold", 0))), 88, true],
+			[_usd(float(y.get("taxes", 0))), 72, true],
+		])
 
 
 func set_property_overview(b: Dictionary, options: Array = [], quotes: Array = []) -> void:
+	_prop_building = b
+	_prop_options = options
+	_prop_quotes = quotes
+	_paint_property()
+
+
+func _paint_property() -> void:
 	_clear(_page_body)
 	_add_room_nav("property")
+	var b := _prop_building
 	if b.is_empty():
 		_note("Click a building on the map, then open Full view.")
 		return
+	var held: bool = bool(b.get("held", false))
+	var listed: bool = bool(b.get("listed", false))
+	var land: bool = str(b.get("cls", "")) == "land"
+	var developing: bool = bool(b.get("developing", false))
+	var tabs: Array = [["overview", "Overview"]]
+	tabs.append(["sell" if held else "acquire", "Sell" if held else "Acquire"])
+	if held and land and not listed:
+		tabs.append(["build", "Build"])
+	if held:
+		tabs.append(["refi", "Refinance"])
+	var ids: Array = []
+	for t in tabs:
+		ids.append(t[0])
+	if not ids.has(_prop_tab):
+		_prop_tab = "overview"
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_page_body.add_child(row)
+	for t in tabs:
+		var id: String = t[0]
+		var btn := _lens(t[1], id == _prop_tab)
+		btn.pressed.connect(func() -> void:
+			_prop_tab = id
+			_paint_property())
+		row.add_child(btn)
 	var addr := str(b.get("address", "")).strip_edges()
 	var title := Label.new()
 	title.text = addr if addr != "" else _class_title(str(b.get("cls", "?")))
@@ -852,25 +976,40 @@ func set_property_overview(b: Dictionary, options: Array = [], quotes: Array = [
 	title.add_theme_color_override("font_color", BwTheme.INK)
 	_page_body.add_child(title)
 	_note("Parcel %s · %s" % [str(b.get("bbl", "?")), str(b.get("district", "")).to_upper()])
+	match _prop_tab:
+		"acquire", "sell":
+			_paint_prop_deal(b, held, listed)
+		"build":
+			_paint_prop_build(b, developing)
+		"refi":
+			_paint_prop_refi()
+		_:
+			_paint_prop_overview(b)
+	var map := _lens("Show on the map", false)
+	map.pressed.connect(hide_page)
+	_page_body.add_child(map)
+
+
+func _paint_prop_overview(b: Dictionary) -> void:
+	_stat_strip([
+		["Appraised", _usd(float(b.get("value", 0))) if float(b.get("value", 0)) > 0.0 else "—"],
+		["NOI / yr", _usd(float(b.get("noi", 0))) if float(b.get("noi", -1)) >= 0.0 else "—"],
+		["Occupancy", ("%.0f%%" % (float(b["occ"]) * 100.0)) if float(b.get("occ", -1)) >= 0.0 else "—"],
+		["Equity", _usd(float(b.get("value", 0)) - float(b.get("debt", 0))) if float(b.get("value", 0)) > 0.0 else "—"],
+	])
 	_kv("Use", _class_title(str(b.get("cls", "?"))))
 	_kv("Building", _fmt_sf(float(b.get("sqft", b.get("sf", 0)))) + " sf")
 	_kv("Lot", _fmt_sf(float(b.get("lot_sqft", b.get("lotSf", 0)))) + " sf")
 	_kv("Floors", str(int(b.get("floors", 0))))
 	_kv("Built", str(int(b.get("year", 0))))
-	if float(b.get("occ", -1.0)) >= 0.0:
-		_kv("Occupancy", "%.0f%%" % (float(b["occ"]) * 100.0))
-	if float(b.get("value", -1.0)) > 0.0:
-		_kv("Appraised", _usd(float(b["value"])))
-	if float(b.get("noi", -1.0)) >= 0.0:
-		_kv("NOI / yr", _usd(float(b["noi"])))
 	if float(b.get("basis", -1.0)) > 0.0:
 		_kv("Basis", _usd(float(b["basis"])))
 	if float(b.get("debt", -1.0)) > 0.0:
 		_kv("Debt", _usd(float(b["debt"])))
-	var held: bool = bool(b.get("held", false))
-	var listed: bool = bool(b.get("listed", false))
+
+
+func _paint_prop_deal(b: Dictionary, held: bool, listed: bool) -> void:
 	var offer := float(b.get("offer", -1.0))
-	var land: bool = str(b.get("cls", "")) == "land"
 	if listed and not held and float(b.get("ask", 0)) > 0.0:
 		_kv("Ask", _usd(float(b["ask"])))
 		var buy := Button.new()
@@ -910,74 +1049,68 @@ func set_property_overview(b: Dictionary, options: Array = [], quotes: Array = [
 			var list := _lens("List quietly at %s" % _usd(ask), false)
 			list.pressed.connect(func() -> void: list_pressed.emit())
 			_page_body.add_child(list)
-	if held and land and not listed and not bool(b.get("developing", false)):
-		var head := Label.new()
-		head.text = "BUILD"
-		BwTheme.style_label(head, 10, false, true)
-		_page_body.add_child(head)
-		if options.is_empty():
-			_note("No programmes underwritten on this lot.")
 		else:
-			_note("The engine underwrote these. A row that does not pencil still runs — the error is the engine's.")
-			for o in options:
-				var use := str(o.get("use", ""))
-				var floors := int(o.get("floors", 0))
-				var why = o.get("why")
-				var mark := "pencils" if bool(o.get("clears", false)) else (
-						str(why) if why != null and str(why) != "<null>" else "does not pencil")
-				var line := "%s    %d fl    %s sf    %s    %s" % [
-						use, floors, _fmt_sf(float(o.get("sf", 0))),
-						_usd(float(o.get("cost", 0))), mark]
-				var bld := Button.new()
-				bld.text = line
-				bld.alignment = HORIZONTAL_ALIGNMENT_LEFT
-				bld.add_theme_stylebox_override("normal", BwTheme.start_opt(bool(o.get("clears", false))))
-				bld.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
-				bld.add_theme_color_override("font_color", BwTheme.INK)
-				bld.add_theme_font_override("font", BwTheme.mono())
-				bld.add_theme_font_size_override("font_size", 12)
-				var u := use
-				var f := floors
-				bld.pressed.connect(func() -> void: develop_pressed.emit(u, f))
-				_page_body.add_child(bld)
-	elif held and bool(b.get("developing", false)):
+			_note("No appraisal to list against.")
+	else:
+		_note("This lot is not for sale.")
+
+
+func _paint_prop_build(b: Dictionary, developing: bool) -> void:
+	if developing:
 		_note("Cranes on site: %s, %s floors." % [
 				str(b.get("jobUse", "building")), str(b.get("jobFloors", "?"))])
-	if held and not quotes.is_empty():
-		var rh := Label.new()
-		rh.text = "REFINANCE"
-		BwTheme.style_label(rh, 10, false, true)
-		_page_body.add_child(rh)
-		_note("Desks that will write against this deed. Proceeds and the coupon are the engine's.")
-		var any := false
-		for q in quotes:
-			if not bool(q.get("available", false)):
+		return
+	if _prop_options.is_empty():
+		_note("No programmes underwritten on this lot.")
+		return
+	_note("The engine underwrote these. A row that does not pencil still runs — the error is the engine's.")
+	_sheet_head([
+		["Use", 110, false], ["Fl", 40, true], ["Sf", 80, true],
+		["Cost", 88, true], ["Verdict", 0, false],
+	])
+	for o in _prop_options:
+		var use := str(o.get("use", ""))
+		var floors := int(o.get("floors", 0))
+		var why = o.get("why")
+		var mark := "pencils" if bool(o.get("clears", false)) else (
+				str(why) if why != null and str(why) != "<null>" else "does not pencil")
+		var u := use
+		var f := floors
+		_sheet_row([
+			[use, 110, false],
+			[str(floors), 40, true],
+			[_fmt_sf(float(o.get("sf", 0))), 80, true],
+			[_usd(float(o.get("cost", 0))), 88, true],
+			[mark, 0, false],
+		], "", false, func() -> void: develop_pressed.emit(u, f), bool(o.get("clears", false)))
+
+
+func _paint_prop_refi() -> void:
+	_note("Desks that will write against this deed. Proceeds and the coupon are the engine's.")
+	if _prop_quotes.is_empty():
+		_note("No desk will quote against this today.")
+		return
+	_sheet_head([
+		["Desk", 0, false], ["Proceeds", 88, true], ["Rate", 64, true],
+	])
+	var any := false
+	for q in _prop_quotes:
+		if not bool(q.get("available", false)):
+			continue
+		any = true
+		var pid := str(q.get("id", ""))
+		_sheet_row([
+			[str(q.get("label", pid)), 0, false],
+			[_usd(float(q.get("proceeds", 0))), 88, true],
+			["—" if q.get("rate") == null else "%.2f%%" % float(q["rate"]), 64, true],
+		], "", false, func() -> void: refi_pressed.emit(pid))
+	if not any:
+		_note("No desk will quote against this today.")
+		for q in _prop_quotes:
+			var why = q.get("why")
+			if why == null or str(why) == "<null>" or str(why) == "":
 				continue
-			any = true
-			var pid := str(q.get("id", ""))
-			var line := "%s    %s    %s" % [
-					str(q.get("label", pid)), _usd(float(q.get("proceeds", 0))),
-					"—" if q.get("rate") == null else "%.2f%%" % float(q["rate"])]
-			var rb := Button.new()
-			rb.text = line
-			rb.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			rb.add_theme_stylebox_override("normal", BwTheme.start_opt(false))
-			rb.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
-			rb.add_theme_color_override("font_color", BwTheme.INK)
-			rb.add_theme_font_override("font", BwTheme.mono())
-			rb.add_theme_font_size_override("font_size", 12)
-			rb.pressed.connect(func() -> void: refi_pressed.emit(pid))
-			_page_body.add_child(rb)
-		if not any:
-			_note("No desk will quote against this today.")
-			for q in quotes:
-				var why = q.get("why")
-				if why == null or str(why) == "<null>" or str(why) == "":
-					continue
-				_note("%s — %s" % [str(q.get("label", q.get("id", "?"))), str(why)])
-	var map := _lens("Show on the map", false)
-	map.pressed.connect(hide_page)
-	_page_body.add_child(map)
+			_note("%s — %s" % [str(q.get("label", q.get("id", "?"))), str(why)])
 
 
 func scroll_page(frac: float = 1.0) -> void:
@@ -1024,7 +1157,7 @@ func _page_meta(page: String) -> PackedStringArray:
 		"portfolio": return PackedStringArray(["Assets", "Portfolio",
 				"Your deeds. Click a row to open the file."])
 		"property": return PackedStringArray(["Assets", "Property",
-				"The complete file. Overview now; rent roll and build follow."])
+				"The complete file. Tabs for the desks this deed has."])
 		"debt": return PackedStringArray(["Capital", "Debt",
 				"The line and every loan the engine has written."])
 		"books": return PackedStringArray(["Capital", "The Books",
@@ -1070,6 +1203,66 @@ func _note(text: String) -> void:
 	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	BwTheme.style_label(lab, 13, false, true)
 	_page_body.add_child(lab)
+
+
+func _sheet_head(cells: Array) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	for c in cells:
+		row.add_child(_sheet_cell(str(c[0]).to_upper(), int(c[1]), bool(c[2]), true))
+	_page_body.add_child(row)
+
+
+func _sheet_row(cells: Array, bbl: String = "", close: bool = false, extra: Callable = Callable(), on: bool = false) -> void:
+	var clickable := extra.is_valid() or (bbl != "" and bbl != "<null>")
+	if not clickable:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		for c in cells:
+			row.add_child(_sheet_cell(str(c[0]), int(c[1]), bool(c[2]), false))
+		_page_body.add_child(row)
+		return
+	var b := Button.new()
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size.y = 28
+	b.add_theme_stylebox_override("normal", BwTheme.start_opt(on))
+	b.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
+	b.add_theme_stylebox_override("pressed", BwTheme.start_opt(true))
+	var hb := HBoxContainer.new()
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hb.add_theme_constant_override("separation", 10)
+	hb.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	hb.offset_left = 10
+	hb.offset_right = -10
+	for c in cells:
+		var lab := _sheet_cell(str(c[0]), int(c[1]), bool(c[2]), false)
+		lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hb.add_child(lab)
+	b.add_child(hb)
+	if extra.is_valid():
+		b.pressed.connect(extra)
+	else:
+		b.pressed.connect(func() -> void:
+			listing_chosen.emit(bbl)
+			if close:
+				hide_page()
+			else:
+				open_page("property"))
+	_page_body.add_child(b)
+
+
+func _sheet_cell(text: String, width: int, numeric: bool, header: bool) -> Label:
+	var lab := Label.new()
+	lab.text = text
+	lab.clip_text = true
+	if width > 0:
+		lab.custom_minimum_size.x = width
+	else:
+		lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if numeric:
+		lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	BwTheme.style_label(lab, 10 if header else 12, true, header)
+	return lab
 
 
 func _table_head(cols: Array) -> void:

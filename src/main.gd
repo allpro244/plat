@@ -307,6 +307,12 @@ func _run_selftest() -> void:
 		print("[plat] selftest campaign advance: %s $%.2fM -> %s $%.2fM" % [
 				before, cash_a / 1e6,
 				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6])
+		_ui.open_page("market")
+		_on_page_opened("market")
+		print("[plat] selftest market: %d rows" % _market_rows.size())
+		for i in range(10):
+			await get_tree().process_frame
+		await _save_frame("renders/ui_market.png")
 		# And a DEAL: buy the cheapest listed lot cash covers. Owners
 		# overlay on so the bought lot's gold marker is in the frame.
 		var cash0 := float(_hud_game.get("cash", 0))
@@ -377,7 +383,7 @@ func _run_selftest() -> void:
 			while _busy:
 				await get_tree().process_frame
 			print("[plat] selftest list: ", _ui.parcel_debug_text())
-			_ui.open_page("property")
+			_ui.open_page("property", "sell")
 			_on_page_opened("property")
 			for i in range(10):
 				await get_tree().process_frame
@@ -386,22 +392,22 @@ func _run_selftest() -> void:
 				await _delist_selected()
 				while _busy:
 					await get_tree().process_frame
-				_ui.open_page("property")
+				_ui.open_page("property", "build")
 				_on_page_opened("property")
 				print("[plat] selftest build options: %d" % _dev_options.size())
 				for i in range(10):
 					await get_tree().process_frame
 				await _save_frame("renders/ui_build.png")
+				_ui.open_page("property", "refi")
+				_on_page_opened("property")
 				print("[plat] selftest refi quotes: %d" % _refi_quotes.size())
 				for q in _refi_quotes:
 					if bool(q.get("available", false)):
 						print("[plat] selftest refi open: %s proceeds %s rate %s" % [
 								str(q.get("id")), str(q.get("proceeds")),
 								str(q.get("rate"))])
-				_ui.scroll_page(1.0)
-				for i in range(6):
+				for i in range(8):
 					await get_tree().process_frame
-				_ui.scroll_page(1.0)
 				await _save_frame("renders/ui_refi.png")
 				for q in _refi_quotes:
 					if not bool(q.get("available", false)):

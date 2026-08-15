@@ -430,16 +430,31 @@ Shipped in the same PR as the first playable B&W session:
 - Inbox: Open → routed page. Empty state offers Acquire.
 - Mouse-only for the session. Keys remain accelerators.
 
-U7 (this cut): List / Delist / Accept offer / Build, then the money desk.
+U7 (shipped): List / Delist / Accept offer / Build, then the money desk.
 Runner verbs `list`, `delist`, `accept-offer`, `draw`, `repay`,
 `refi-quotes`, `refi` sit next to the existing `develop-options` /
-`develop`. Glance card and property file show list / build. Capital →
-Debt draws and repays the line at the engine's available / drawn amounts.
-The property file lists desks that will write against the deed; a click
-calls `refinance`. Ask, proceeds, and the coupon are the engine's.
+`develop`. Ask, proceeds, and the coupon are the engine's.
+
+U4 leftover + U9 first slice (this cut): the desks you already have
+become files, not logs.
+
+- Property room tabs — Overview / Acquire·Sell / Build / Refinance —
+  shown only when that desk has something to do. Glance **Build…**
+  opens the Build tab; **Full view** opens Overview.
+- Tables are columns with reserved widths, not `"%s    %s"` paste.
+  Marketplace, portfolio, economy, debt, books, and the build
+  programmes all use the same row helper.
+- Marketplace class chips (All / land / office / retail / multifamily /
+  industrial) filter the exported tape. A strip counts listings and
+  motivated sellers. **Highlight on map** is the Market lens from
+  inside the room.
+- Elevation: two-shadow numbers from `index.css` (`--lift-2` / `--lift-3`)
+  plus a top-edge hairline on the page sheet. FPS leaves the bar —
+  it is not a vital.
 
 Still stubs: Deals, Notes, Leasing, Staff, Research. LOI and lease
-extend are next.
+extend are the next write verbs. Do not open those rooms as pretty
+empty tables.
 
 ---
 
@@ -455,5 +470,6 @@ extend are next.
 - `renders/ui_drawn.png` — Draw $X on the line; vitals show drawn / limit
 - `renders/ui_listed.png` — list the bought lot at appraisal
 - `renders/ui_build.png` — underwritten programmes on vacant dirt
-- `renders/ui_refi.png` — desks that will write against the deed
+- `renders/ui_refi.png` — Refinance tab: First Harbor land loan
+- `renders/ui_market.png` — tape with class chips and aligned columns
 - `renders/playable_selftest.png` — the click path that produced them
