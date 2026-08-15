@@ -74,6 +74,16 @@ var _page_sub: Label
 var _page_scroll: ScrollContainer
 var _page_body: VBoxContainer
 
+var _decision: Control
+var _decision_kicker: Label
+var _decision_title: Label
+var _decision_sub: Label
+var _decision_note: Label
+var _decision_actions: HBoxContainer
+var _attention: Array = []
+var _deferred: Dictionary = {}
+var _decision_item: Dictionary = {}
+
 var _parcel_data: Dictionary = {}
 var _campaign := false
 var _page_name := ""
@@ -96,6 +106,7 @@ func _ready() -> void:
 	_build_map_hud()
 	_build_parcel()
 	_build_page()
+	_build_decision()
 	start = StartMenu.new()
 	add_child(start)
 	start.break_ground_pressed.connect(func(s: String, d: String, c: int) -> void:
@@ -115,6 +126,7 @@ func set_playing(on: bool) -> void:
 	if not on:
 		_parcel.visible = false
 		_page.visible = false
+		hide_decision()
 
 
 func set_resume(path: String, label: String) -> void:
@@ -499,6 +511,69 @@ func _build_page() -> void:
 	_page_scroll.add_child(_page_body)
 
 
+func _build_decision() -> void:
+	_decision = Control.new()
+	_decision.visible = false
+	_decision.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	_decision.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_decision)
+	var wash := ColorRect.new()
+	wash.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	wash.color = Color(0.09, 0.08, 0.05, 0.55)
+	_decision.add_child(wash)
+	var sheet := Panel.new()
+	sheet.set_anchors_preset(PRESET_CENTER)
+	sheet.offset_left = -280
+	sheet.offset_right = 280
+	sheet.offset_top = -220
+	sheet.offset_bottom = 220
+	sheet.add_theme_stylebox_override("panel", BwTheme.page_sheet())
+	sheet.mouse_filter = Control.MOUSE_FILTER_STOP
+	_decision.add_child(sheet)
+	var hair := ColorRect.new()
+	hair.color = BwTheme.HAIRLINE
+	hair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hair.set_anchors_preset(PRESET_TOP_WIDE)
+	hair.offset_left = 10
+	hair.offset_right = -10
+	hair.offset_top = 1
+	hair.offset_bottom = 2
+	sheet.add_child(hair)
+	var pad := MarginContainer.new()
+	pad.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	pad.add_theme_constant_override("margin_left", 28)
+	pad.add_theme_constant_override("margin_right", 28)
+	pad.add_theme_constant_override("margin_top", 22)
+	pad.add_theme_constant_override("margin_bottom", 22)
+	sheet.add_child(pad)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	pad.add_child(col)
+	_decision_kicker = Label.new()
+	BwTheme.style_label(_decision_kicker, 10, false, true)
+	col.add_child(_decision_kicker)
+	_decision_title = Label.new()
+	_decision_title.add_theme_font_override("font", BwTheme.serif())
+	_decision_title.add_theme_font_size_override("font_size", 24)
+	_decision_title.add_theme_color_override("font_color", BwTheme.INK)
+	_decision_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_decision_title)
+	_decision_sub = Label.new()
+	BwTheme.style_label(_decision_sub, 13, false, true)
+	_decision_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_decision_sub)
+	_decision_note = Label.new()
+	_decision_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	BwTheme.style_label(_decision_note, 13, false, true)
+	col.add_child(_decision_note)
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(spacer)
+	_decision_actions = HBoxContainer.new()
+	_decision_actions.add_theme_constant_override("separation", 8)
+	col.add_child(_decision_actions)
+
+
 func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
 	_campaign = campaign
 	if not campaign:
@@ -528,8 +603,11 @@ func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
 		for s in hud.get("attention", []):
 			items.append({"label": str(s), "page": "market", "bbl": ""})
 	var nxt: Variant = hud.get("next", {})
+	_attention = items
+	_prune_deferred()
 	set_inbox(items, bool(hud.get("yearOne", false)), int(hud.get("monthsLeft", 0)),
 			nxt if nxt is Dictionary else {})
+	_advance_btn.text = "Decide ▸" if not _first_blocking().is_empty() else "Advance ▸"
 
 
 func _set_stat(key: String, value: String, bad: bool = false) -> void:
@@ -866,6 +944,138 @@ func hide_page() -> void:
 
 func current_page() -> String:
 	return _page_name
+
+
+func is_decision_visible() -> bool:
+	return _decision != null and _decision.visible
+
+
+func decision_debug_text() -> String:
+	if not is_decision_visible():
+		return ""
+	return "%s | %s | %s" % [_decision_kicker.text, _decision_title.text, _decision_note.text]
+
+
+func hide_decision() -> void:
+	if _decision:
+		_decision.visible = false
+	_decision_item = {}
+	if _campaign and (_page == null or not _page.visible):
+		_inbox.visible = true
+		if _map_hud:
+			_map_hud.visible = true
+
+
+func show_next_decision() -> bool:
+	var it := _first_blocking()
+	if it.is_empty():
+		hide_decision()
+		return false
+	_paint_decision(it)
+	return true
+
+
+func _first_blocking() -> Dictionary:
+	for it in _attention:
+		if not it is Dictionary:
+			continue
+		if not bool(it.get("blocking", false)):
+			continue
+		var k := str(it.get("key", ""))
+		if _deferred.has(k):
+			continue
+		return it
+	return {}
+
+
+func _prune_deferred() -> void:
+	var live: Dictionary = {}
+	for it in _attention:
+		if it is Dictionary:
+			live[str(it.get("key", ""))] = true
+	var drop: Array = []
+	for k in _deferred.keys():
+		if not live.has(k):
+			drop.append(k)
+	for k in drop:
+		_deferred.erase(k)
+
+
+func _paint_decision(it: Dictionary) -> void:
+	_decision_item = it
+	_decision.visible = true
+	if _page:
+		_page.visible = false
+		_page_name = ""
+	_inbox.visible = false
+	if _map_hud:
+		_map_hud.visible = false
+	_parcel.visible = false
+	_clear(_decision_actions)
+	var kind := str(it.get("kind", ""))
+	var letter: Dictionary = it.get("letter", {}) if it.get("letter") is Dictionary else {}
+	var offer: Dictionary = it.get("offer", {}) if it.get("offer") is Dictionary else {}
+	if kind == "loi" and not letter.is_empty():
+		var lk := str(letter.get("kind", "new"))
+		_decision_kicker.text = "RENEWAL ON THE TABLE" if lk == "renewal" else "LETTER OF INTENT"
+		_decision_title.text = str(letter.get("name", "?"))
+		_decision_sub.text = "%s · %s · %s" % [
+				str(letter.get("sector", "")),
+				str(letter.get("credit", "")),
+				str(letter.get("address", ""))]
+		var rpsf = letter.get("rentPsf")
+		var sign = letter.get("signing")
+		_decision_note.text = "%s sf · %s · %d mo · TI $%s/sf · %s mo free · answer by %s%s" % [
+				_fmt_sf(float(letter.get("sf", 0))),
+				("—" if rpsf == null else "$%.2f/sf" % float(rpsf)),
+				int(letter.get("termM", 0)),
+				str(int(round(float(letter.get("tiPsf", 0))))),
+				str(int(letter.get("freeM", 0))),
+				str(letter.get("expires", "?")),
+				"" if sign == null else " · signing %s" % _usd(float(sign))]
+		var acc := _ink_buy("Accept")
+		var lid := int(letter.get("id", 0))
+		acc.pressed.connect(func() -> void:
+			hide_decision()
+			loi_pressed.emit(lid, "accept"))
+		_decision_actions.add_child(acc)
+		var pas := _lens("Pass", false)
+		pas.pressed.connect(func() -> void:
+			hide_decision()
+			loi_pressed.emit(lid, "decline"))
+		_decision_actions.add_child(pas)
+	elif kind == "offer" and not offer.is_empty():
+		_decision_kicker.text = "OFFER IN HAND"
+		_decision_title.text = "%s for %s" % [
+				_usd(float(offer.get("price", 0))),
+				str(offer.get("address", "?"))]
+		_decision_sub.text = "Your ask %s · good until %s" % [
+				_usd(float(offer.get("ask", 0))),
+				str(offer.get("expires", "?"))]
+		_decision_note.text = "They are buying. You are selling. The number is the engine's."
+		var acc := _ink_buy("Accept offer")
+		var bbl := str(offer.get("bbl", it.get("bbl", "")))
+		acc.pressed.connect(func() -> void:
+			hide_decision()
+			listing_chosen.emit(bbl)
+			accept_offer_pressed.emit())
+		_decision_actions.add_child(acc)
+	else:
+		_decision_kicker.text = "ON YOUR DESK"
+		_decision_title.text = str(it.get("label", "A decision is waiting."))
+		_decision_sub.text = ""
+		_decision_note.text = "Open the desk. The engine already has the numbers."
+		var open := _ink_buy("Open")
+		open.pressed.connect(func() -> void:
+			hide_decision()
+			attention_opened.emit(it)
+			open_page(str(it.get("page", "deals"))))
+		_decision_actions.add_child(open)
+	var later := _lens("Decide later", false)
+	later.pressed.connect(func() -> void:
+		_deferred[str(it.get("key", ""))] = true
+		hide_decision())
+	_decision_actions.add_child(later)
 
 
 func set_market_rows(rows: Array) -> void:

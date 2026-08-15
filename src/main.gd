@@ -123,9 +123,9 @@ func _ready() -> void:
 	add_child(layer)
 	_ui = GameUi.new()
 	layer.add_child(_ui)
-	_ui.advance_pressed.connect(func() -> void: _advance_campaign(1, false))
-	_ui.year_pressed.connect(func() -> void: _advance_campaign(12, true))
-	_ui.skip_pressed.connect(func() -> void: _advance_campaign(36, true))
+	_ui.advance_pressed.connect(func() -> void: _advance_or_decide(1, false))
+	_ui.year_pressed.connect(func() -> void: _advance_or_decide(12, true))
+	_ui.skip_pressed.connect(func() -> void: _advance_or_decide(36, true))
 	_ui.buy_pressed.connect(_buy_selected)
 	_ui.offer_pressed.connect(_offer_selected)
 	_ui.walk_pressed.connect(_walk_selected)
@@ -413,6 +413,13 @@ func _run_selftest() -> void:
 				print("[plat] selftest wait letter: month %s letters %d" % [
 						str(_hud_game.get("date", "?")),
 						int((_leasing.get("letters", []) as Array).size())])
+				_ui.hide_page()
+				_ui.show_next_decision()
+				print("[plat] selftest decision: ", _ui.decision_debug_text())
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_decision.png")
+				_ui.hide_decision()
 				_ui.open_page("leasing")
 				_on_page_opened("leasing")
 				for i in range(10):
@@ -749,6 +756,16 @@ func _load_game_hud() -> void:
 ## Advance the CAMPAIGN: the simulation runs in node (the engine repo's
 ## game-server), plat re-reads the files it wrote and rebuilds. The sim owns
 ## the quantities; this view never computes one.
+func _advance_or_decide(months: int, until_attention: bool) -> void:
+	if _ui != null and _ui.is_decision_visible():
+		return
+	if _ui != null and _ui.show_next_decision():
+		return
+	await _advance_campaign(months, until_attention)
+	if _ui != null:
+		_ui.show_next_decision()
+
+
 func _advance_campaign(months: int, until_attention: bool = false) -> void:
 	if _busy or _campaign_dir == "":
 		return
@@ -1489,7 +1506,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SPACE:
 				# The game key: a season passes, the sim decides what
 				# changed, the city rebuilds to show it.
-				_advance_campaign(1, false)
+				_advance_or_decide(1, false)
 			KEY_ESCAPE:
 				get_tree().quit()
 

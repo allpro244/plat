@@ -463,12 +463,18 @@ deed. The Deals desk lists talks (contracts first). Close funds
 the agreed price; Walk tears it up; Accept their number takes a
 counter. Seller reserve is not exported.
 
-U10 (this cut): the first lease. Buy a building with floors
+U10 (shipped): the first lease. Buy a building with floors
 (not vacant dirt). `respond-loi` accept / pass — no rent slider.
 `desks/leasing.json` is the roll and the letters. The Leasing
 room and the property Rent roll tab paint them. Accept / Pass
 also sit on Deals, where the inbox already routes a letter.
 Signing cost is `loiSigningCost`. Counter waits.
+
+U11 (this cut): interruptions. A letter or an offer on one of
+yours takes the screen. Advance / Year / Skip will not walk
+past it — the bar says Decide until you Accept, Pass, or
+Decide later. The card paints the exported letter, not a
+paragraph we wrote. Decide later leaves it on Deals.
 
 U5 leftover + U9 inbox / map HUD (this cut): the city tells you
 what to do, and a room owns the screen.
@@ -504,4 +510,5 @@ what to do, and a room owns the screen.
 - `renders/ui_deals.png` — under contract after Offer at ask
 - `renders/ui_leasing.png` — renewal letter on the roll
 - `renders/ui_leased.png` — after Accept
+- `renders/ui_decision.png` — the letter takes the screen
 - `renders/playable_selftest.png` — the click path that produced them

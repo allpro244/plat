@@ -161,7 +161,7 @@ function readVitals(E, city, g) {
         if (l) bbl = l.bbl;
         page = page || "deals";
       }
-      attn.push({ key: a.key, label: a.label, page, bbl });
+      attn.push(enrichAttention(E, city, g, a, page, bbl));
     }
   } catch { /* */ }
   return { nw, line, cf, book, attn };
@@ -172,6 +172,41 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 function monthLabel(m) {
   const n = Number(m) || 0;
   return `${MONTH_NAMES[((n % 12) + 12) % 12]} ${2000 + Math.floor(n / 12)}`;
+}
+
+/** Inbox row plus enough payload to paint a decision card. */
+function enrichAttention(E, city, g, a, page, bbl) {
+  const key = String(a.key ?? "");
+  const head = key.split(":")[0];
+  const item = {
+    key, label: a.label, page, bbl,
+    kind: head, blocking: false, letter: null, offer: null,
+  };
+  if (head === "loi") {
+    const id = Number(key.split(":")[1]);
+    const l = (g.lois ?? []).find((x) => x.id === id);
+    if (l) {
+      item.blocking = true;
+      item.kind = "loi";
+      item.letter = letterOf(E, city, g, l);
+      item.bbl = item.bbl ?? l.bbl;
+    }
+  } else if (head === "offer" || head === "sale-bids") {
+    item.blocking = true;
+    const bb = bbl ?? key.split(":")[1];
+    const h = g.holdings?.[bb];
+    const rec = E.resolveRec(city.parcels, g, bb);
+    if (h?.sale?.offer) {
+      item.offer = {
+        bbl: bb,
+        address: rec?.address ?? bb,
+        price: Math.round(h.sale.offer.price),
+        ask: Math.round(h.sale.ask ?? 0),
+        expires: h.sale.offer.expiresM != null ? monthLabel(h.sale.offer.expiresM) : null,
+      };
+    }
+  }
+  return item;
 }
 
 function listedAsk(g, bbl) {
