@@ -11,6 +11,9 @@ signal list_pressed
 signal delist_pressed
 signal accept_offer_pressed
 signal develop_pressed(use: String, floors: int)
+signal draw_pressed
+signal repay_pressed
+signal refi_pressed(product: String)
 signal listing_chosen(bbl: String)
 signal page_opened(page: String)
 signal break_ground_pressed(size: String, density: String, cash: int)
@@ -54,6 +57,7 @@ var _page: Control
 var _page_kicker: Label
 var _page_title: Label
 var _page_sub: Label
+var _page_scroll: ScrollContainer
 var _page_body: VBoxContainer
 
 var _parcel_data: Dictionary = {}
@@ -403,14 +407,14 @@ func _build_page() -> void:
 	x.add_theme_color_override("font_color", BwTheme.INK_DIM)
 	x.pressed.connect(hide_page)
 	head.add_child(x)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	col.add_child(scroll)
+	_page_scroll = ScrollContainer.new()
+	_page_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(_page_scroll)
 	_page_body = VBoxContainer.new()
 	_page_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_page_body.add_theme_constant_override("separation", 6)
-	scroll.add_child(_page_body)
+	_page_scroll.add_child(_page_body)
 
 
 func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
@@ -777,6 +781,22 @@ func set_debt(doc: Dictionary) -> void:
 		["Coupon", _pct(loc.get("rate"), 2)],
 		["Book debt", _usd(float(tot.get("total", 0)))],
 	])
+	var draw_amt := float(loc.get("drawAmt", loc.get("available", 0)))
+	var repay_amt := float(loc.get("repayAmt", 0))
+	_note("The line covers a shortfall before the run dies. Idle cash above $250k pays it back.")
+	if draw_amt > 0.0:
+		var draw := Button.new()
+		draw.text = "Draw %s" % _usd(draw_amt)
+		draw.add_theme_stylebox_override("normal", BwTheme.buy_btn())
+		draw.add_theme_stylebox_override("hover", BwTheme.buy_btn())
+		draw.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
+		draw.add_theme_color_override("font_color", Color("#f6efdc"))
+		draw.pressed.connect(func() -> void: draw_pressed.emit())
+		_page_body.add_child(draw)
+	if repay_amt > 0.0:
+		var repay := _lens("Repay %s" % _usd(repay_amt), false)
+		repay.pressed.connect(func() -> void: repay_pressed.emit())
+		_page_body.add_child(repay)
 	var loans: Array = doc.get("loans", [])
 	if loans.is_empty():
 		_note("No mortgages on the book. The line is the only paper.")
@@ -818,7 +838,7 @@ func set_books(doc: Dictionary) -> void:
 		_page_body.add_child(lab)
 
 
-func set_property_overview(b: Dictionary, options: Array = []) -> void:
+func set_property_overview(b: Dictionary, options: Array = [], quotes: Array = []) -> void:
 	_clear(_page_body)
 	_add_room_nav("property")
 	if b.is_empty():
@@ -923,9 +943,49 @@ func set_property_overview(b: Dictionary, options: Array = []) -> void:
 	elif held and bool(b.get("developing", false)):
 		_note("Cranes on site: %s, %s floors." % [
 				str(b.get("jobUse", "building")), str(b.get("jobFloors", "?"))])
+	if held and not quotes.is_empty():
+		var rh := Label.new()
+		rh.text = "REFINANCE"
+		BwTheme.style_label(rh, 10, false, true)
+		_page_body.add_child(rh)
+		_note("Desks that will write against this deed. Proceeds and the coupon are the engine's.")
+		var any := false
+		for q in quotes:
+			if not bool(q.get("available", false)):
+				continue
+			any = true
+			var pid := str(q.get("id", ""))
+			var line := "%s    %s    %s" % [
+					str(q.get("label", pid)), _usd(float(q.get("proceeds", 0))),
+					"—" if q.get("rate") == null else "%.2f%%" % float(q["rate"])]
+			var rb := Button.new()
+			rb.text = line
+			rb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			rb.add_theme_stylebox_override("normal", BwTheme.start_opt(false))
+			rb.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
+			rb.add_theme_color_override("font_color", BwTheme.INK)
+			rb.add_theme_font_override("font", BwTheme.mono())
+			rb.add_theme_font_size_override("font_size", 12)
+			rb.pressed.connect(func() -> void: refi_pressed.emit(pid))
+			_page_body.add_child(rb)
+		if not any:
+			_note("No desk will quote against this today.")
+			for q in quotes:
+				var why = q.get("why")
+				if why == null or str(why) == "<null>" or str(why) == "":
+					continue
+				_note("%s — %s" % [str(q.get("label", q.get("id", "?"))), str(why)])
 	var map := _lens("Show on the map", false)
 	map.pressed.connect(hide_page)
 	_page_body.add_child(map)
+
+
+func scroll_page(frac: float = 1.0) -> void:
+	if _page_scroll == null:
+		return
+	var mb := _page_body.get_combined_minimum_size().y
+	var vh := _page_scroll.size.y
+	_page_scroll.scroll_vertical = int(maxf(0.0, mb - vh) * clampf(frac, 0.0, 1.0))
 
 
 func set_page_note(text: String) -> void:

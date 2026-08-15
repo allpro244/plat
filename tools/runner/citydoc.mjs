@@ -376,12 +376,18 @@ function debtDesk(E, city, g, line) {
   let locRate = null;
   try { locRate = E.locRate(g); } catch { /* */ }
   const drawn = g.loc?.balance ?? 0;
+  let available = Math.max(0, Math.round((line ?? 0) - drawn));
+  try { available = Math.round(E.locAvailable(g, city.parcels)); } catch { /* */ }
+  const cash = Math.round(g.cash ?? 0);
   return {
     loc: {
       limit: line,
       drawn: Math.round(drawn),
-      available: Math.max(0, Math.round((line ?? 0) - drawn)),
+      available,
       rate: locRate,
+      cash,
+      drawAmt: available,
+      repayAmt: Math.min(Math.round(drawn), Math.max(0, cash)),
     },
     loans,
     totals: {

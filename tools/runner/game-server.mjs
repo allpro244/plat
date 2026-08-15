@@ -194,6 +194,80 @@ if (cmd === "new") {
   g = r.s;
   writeAll(meta, city, g);
   console.log(`SOLD ${bbl}`);
+} else if (cmd === "draw") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  let amt = Math.max(0, parseInt(arg("amt", "0"), 10) || 0);
+  if (!(amt > 0)) {
+    try { amt = Math.round(E.locAvailable(g, city.parcels)); } catch { /* */ }
+  }
+  const r = E.drawLoc(g, city.parcels, amt);
+  const result = { op: "draw", amt, ok: !r.err, err: r.err ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("DRAW FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`DREW $${(amt / 1e6).toFixed(2)}M on the line`);
+} else if (cmd === "repay") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  let amt = Math.max(0, parseInt(arg("amt", "0"), 10) || 0);
+  if (!(amt > 0)) amt = Math.round(g.loc?.balance ?? 0);
+  const r = E.repayLoc(g, amt);
+  const result = { op: "repay", amt, ok: !r.err, err: r.err ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("REPAY FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`REPAID $${(amt / 1e6).toFixed(2)}M on the line`);
+} else if (cmd === "refi-quotes") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  const g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  let pack = { bbl, value: 0, payoff: 0, quotes: [] };
+  try { pack = { bbl, ...E.refiQuotes(g, city.parcels, bbl) }; } catch { /* */ }
+  const quotes = (pack.quotes ?? []).map((q) => ({
+    id: q.id,
+    label: q.label,
+    rate: q.ratePct ?? null,
+    proceeds: Math.round(q.maxProceeds ?? 0),
+    available: !!q.available,
+    why: q.why ?? null,
+    binding: q.binding ?? null,
+  }));
+  writeFileSync(join(dir, "refi.json"), JSON.stringify({
+    bbl, value: Math.round(pack.value ?? 0), payoff: Math.round(pack.payoff ?? 0), quotes,
+  }));
+  console.log(`${quotes.filter((q) => q.available).length}/${quotes.length} desks will quote ${bbl} -> refi.json`);
+} else if (cmd === "refi") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const product = arg("product", "savings");
+  const lev = Math.max(0, Math.min(1, parseFloat(arg("lev", "1")) || 1));
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.refinance(g, city.parcels, bbl, product, lev);
+  const result = { op: "refi", bbl, product, ok: !r.err, err: r.err ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("REFI FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`REFINANCED ${bbl} with ${product}`);
 } else if (cmd === "develop") {
   const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
   const bbl = arg("bbl", "");
@@ -213,6 +287,6 @@ if (cmd === "new") {
   writeAll(meta, city, g);
   console.log(`DEVELOPING ${bbl}: ${floors}-floor ${use}`);
 } else {
-  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|develop-options|develop --dir=D [--seed --size --density --cash --months --until=attention --bbl --ask --mode --use --floors]");
+  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
   process.exit(1);
 }

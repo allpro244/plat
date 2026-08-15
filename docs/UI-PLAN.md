@@ -177,7 +177,7 @@ job, no room, no inbox Open, no start dials.
 | Lenses | 6 | Owners only |
 | Time | Month / year / skip-to-attention | One Advance (3 months) |
 | Mouse-only | Yes | No — Space, B, Tab, F1, M, H are the game |
-| Runner verbs | Full store (buy, LOI, refi, develop, lease…) | `new`, `advance`, `buy`, `develop-options`, `develop` |
+| Runner verbs | Full store (buy, LOI, refi, develop, lease…) | `new`, `advance`, `buy`, `list`, `delist`, `accept-offer`, `draw`, `repay`, `refi-quotes`, `refi`, `develop-options`, `develop` |
 | Exported HUD | Thin `hud.json` | Same thin file |
 
 The embarrassing part is not missing desks 8–15. It is that **the session
@@ -430,14 +430,16 @@ Shipped in the same PR as the first playable B&W session:
 - Inbox: Open → routed page. Empty state offers Acquire.
 - Mouse-only for the session. Keys remain accelerators.
 
-U7 (this cut): List / Delist / Accept offer / Build. Runner verbs
-`list`, `delist`, `accept-offer` sit next to the existing `develop-options`
-/ `develop`. Glance card and property file show the buttons. Ask is the
-engine appraisal (`ownedHoldingValue`); plat does not pick a price.
-A bought lot is no longer a dead end.
+U7 (this cut): List / Delist / Accept offer / Build, then the money desk.
+Runner verbs `list`, `delist`, `accept-offer`, `draw`, `repay`,
+`refi-quotes`, `refi` sit next to the existing `develop-options` /
+`develop`. Glance card and property file show list / build. Capital →
+Debt draws and repays the line at the engine's available / drawn amounts.
+The property file lists desks that will write against the deed; a click
+calls `refinance`. Ask, proceeds, and the coupon are the engine's.
 
-Still stubs: Deals, Notes, Leasing, Staff, Research. LOI, refi, and the
-line draw are next.
+Still stubs: Deals, Notes, Leasing, Staff, Research. LOI and lease
+extend are next.
 
 ---
 
@@ -450,4 +452,8 @@ line draw are next.
 - `renders/ui_news.png` — the tape
 - `renders/ui_debt.png` — the line, no mortgages yet
 - `renders/ui_books.png` — cash / NW / year-2000 ledger
+- `renders/ui_drawn.png` — Draw $X on the line; vitals show drawn / limit
+- `renders/ui_listed.png` — list the bought lot at appraisal
+- `renders/ui_build.png` — underwritten programmes on vacant dirt
+- `renders/ui_refi.png` — desks that will write against the deed
 - `renders/playable_selftest.png` — the click path that produced them

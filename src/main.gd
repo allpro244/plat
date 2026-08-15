@@ -88,6 +88,7 @@ var _economy: Dictionary = {}
 var _debt: Dictionary = {}
 var _books: Dictionary = {}
 var _dev_options: Array = []
+var _refi_quotes: Array = []
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -127,6 +128,9 @@ func _ready() -> void:
 	_ui.delist_pressed.connect(_delist_selected)
 	_ui.accept_offer_pressed.connect(_accept_offer)
 	_ui.develop_pressed.connect(_develop_selected)
+	_ui.draw_pressed.connect(_draw_line)
+	_ui.repay_pressed.connect(_repay_line)
+	_ui.refi_pressed.connect(_refi_selected)
 	_ui.listing_chosen.connect(_focus_listing)
 	_ui.page_opened.connect(_on_page_opened)
 	_ui.break_ground_pressed.connect(_break_ground_opts)
@@ -352,6 +356,22 @@ func _run_selftest() -> void:
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_books.png")
+			# Draw the available line before Advance — idle cash above $250k
+			# sweeps it on the next month tick.
+			var loc0: Dictionary = _debt.get("loc", {})
+			var draw_amt := float(loc0.get("drawAmt", loc0.get("available", 0)))
+			if draw_amt > 0.0:
+				await _draw_line()
+				while _busy:
+					await get_tree().process_frame
+				_ui.open_page("debt")
+				_on_page_opened("debt")
+				print("[plat] selftest draw: line %s cash $%.2fM" % [
+						str(_debt.get("loc", {})),
+						float(_hud_game.get("cash", 0)) / 1e6])
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_drawn.png")
 			_ui.hide_page()
 			await _list_selected()
 			while _busy:
@@ -372,6 +392,27 @@ func _run_selftest() -> void:
 				for i in range(10):
 					await get_tree().process_frame
 				await _save_frame("renders/ui_build.png")
+				print("[plat] selftest refi quotes: %d" % _refi_quotes.size())
+				for q in _refi_quotes:
+					if bool(q.get("available", false)):
+						print("[plat] selftest refi open: %s proceeds %s rate %s" % [
+								str(q.get("id")), str(q.get("proceeds")),
+								str(q.get("rate"))])
+				_ui.scroll_page(1.0)
+				for i in range(6):
+					await get_tree().process_frame
+				_ui.scroll_page(1.0)
+				await _save_frame("renders/ui_refi.png")
+				for q in _refi_quotes:
+					if not bool(q.get("available", false)):
+						continue
+					await _refi_selected(str(q.get("id", "")))
+					while _busy:
+						await get_tree().process_frame
+					print("[plat] selftest refi: product %s cash $%.2fM debt room %s" % [
+							str(q.get("id")), float(_hud_game.get("cash", 0)) / 1e6,
+							str(_debt.get("totals", {}))])
+					break
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
@@ -866,12 +907,14 @@ func _on_page_opened(page: String) -> void:
 		"property":
 			var card := _enrich(_selected) if not _selected.is_empty() else {}
 			_dev_options = []
-			if not card.is_empty() and bool(card.get("held", false)) \
-					and str(card.get("cls", "")) == "land" \
-					and not bool(card.get("developing", false)) \
-					and not bool(card.get("listed", false)):
-				_dev_options = _fetch_develop_options(str(card.get("bbl", "")))
-			_ui.set_property_overview(card, _dev_options)
+			_refi_quotes = []
+			if not card.is_empty() and bool(card.get("held", false)):
+				if str(card.get("cls", "")) == "land" \
+						and not bool(card.get("developing", false)) \
+						and not bool(card.get("listed", false)):
+					_dev_options = _fetch_develop_options(str(card.get("bbl", "")))
+				_refi_quotes = _fetch_refi_quotes(str(card.get("bbl", "")))
+			_ui.set_property_overview(card, _dev_options, _refi_quotes)
 		_:
 			_ui.set_page_note("This desk is next. The engine already has the numbers; the export is not wired yet.")
 
@@ -986,6 +1029,49 @@ func _develop_selected(use: String, floors: int) -> void:
 	await _run_verb("develop", PackedStringArray([
 			"--bbl=" + str(_selected.get("bbl", "")),
 			"--use=" + use, "--floors=%d" % floors]))
+
+
+func _draw_line() -> void:
+	if _busy or _campaign_dir == "":
+		return
+	var loc: Dictionary = _debt.get("loc", {})
+	var amt := int(round(float(loc.get("drawAmt", loc.get("available", 0)))))
+	if amt <= 0:
+		return
+	await _run_verb("draw", PackedStringArray(["--amt=%d" % amt]))
+
+
+func _repay_line() -> void:
+	if _busy or _campaign_dir == "":
+		return
+	var loc: Dictionary = _debt.get("loc", {})
+	var amt := int(round(float(loc.get("repayAmt", 0))))
+	if amt <= 0:
+		return
+	await _run_verb("repay", PackedStringArray(["--amt=%d" % amt]))
+
+
+func _refi_selected(product: String) -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty() or product == "":
+		return
+	await _run_verb("refi", PackedStringArray([
+			"--bbl=" + str(_selected.get("bbl", "")),
+			"--product=" + product]))
+
+
+func _fetch_refi_quotes(bbl: String) -> Array:
+	if _campaign_dir == "" or bbl == "":
+		return []
+	var runner := _resolve_runner()
+	if runner == "":
+		return []
+	_run_sim(PackedStringArray([runner, "refi-quotes", "--dir=" + _campaign_dir,
+			"--bbl=" + bbl]))
+	var doc: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/refi.json"))
+	if doc is Dictionary:
+		return (doc as Dictionary).get("quotes", [])
+	return []
 
 
 func _fetch_develop_options(bbl: String) -> Array:
