@@ -191,6 +191,11 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 				tint = Color(0.95, 0.72, 0.18)
 			else:
 				tint = Color(0.42, 0.42, 0.44)
+		elif overlay == "construction":
+			if b.get("developing", false):
+				tint = Color(0.95, 0.55, 0.18)
+			else:
+				tint = Color(0.40, 0.40, 0.42)
 		tint.a = clampf(float(b["z1"]) / 400.0, 0.02, 1.0)
 		_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
 		# Curtain wall: a tall office building of the glass era. Class and

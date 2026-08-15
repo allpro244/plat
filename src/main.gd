@@ -89,6 +89,7 @@ var _debt: Dictionary = {}
 var _books: Dictionary = {}
 var _dev_options: Array = []
 var _refi_quotes: Array = []
+var _map_desk: Dictionary = {}
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -139,6 +140,7 @@ func _ready() -> void:
 		_selected = {}
 		_ui.hide_parcel())
 	_ui.lens_pressed.connect(_on_lens)
+	_ui.map_filter_pressed.connect(_on_map_filter)
 	_ui.attention_opened.connect(_on_attention)
 	_build_nav_widget(layer)
 	_refresh_resume()
@@ -307,6 +309,12 @@ func _run_selftest() -> void:
 		print("[plat] selftest campaign advance: %s $%.2fM -> %s $%.2fM" % [
 				before, cash_a / 1e6,
 				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6])
+		_ui.hide_page()
+		print("[plat] selftest inbox: yearOne=%s next=%s" % [
+				str(_hud_game.get("yearOne")), str(_hud_game.get("next", {}))])
+		for i in range(8):
+			await get_tree().process_frame
+		await _save_frame("renders/ui_inbox.png")
 		_ui.open_page("market")
 		_on_page_opened("market")
 		print("[plat] selftest market: %d rows" % _market_rows.size())
@@ -328,6 +336,11 @@ func _run_selftest() -> void:
 					int(_hud_game.get("holdings", 0))])
 			if _ui.is_parcel_visible():
 				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
+			_ui.hide_page()
+			print("[plat] selftest inbox after buy: next=%s" % str(_hud_game.get("next", {})))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_map.png")
 			_ui.open_page("portfolio")
 			_on_page_opened("portfolio")
 			var port_n := 0
@@ -848,6 +861,8 @@ func _load_desks() -> void:
 	_economy = _desk_file("economy")
 	_debt = _desk_file("debt")
 	_books = _desk_file("books")
+	_map_desk = _desk_file("map")
+	_ui.set_map_hud(_map_desk)
 
 
 func _desk_file(name: String) -> Dictionary:
@@ -930,6 +945,18 @@ func _on_lens(name: String, on: bool) -> void:
 		ContextGen.overlay = "owners" if on else ""
 	elif name == "listings":
 		ContextGen.overlay = "listings" if on else ""
+	else:
+		return
+	_rebuild()
+
+
+func _on_map_filter(name: String) -> void:
+	if name == "city":
+		ContextGen.overlay = ""
+	elif name == "book":
+		ContextGen.overlay = "owners"
+	elif name == "cranes":
+		ContextGen.overlay = "construction"
 	else:
 		return
 	_rebuild()

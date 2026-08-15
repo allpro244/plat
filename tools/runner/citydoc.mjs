@@ -37,6 +37,7 @@ export function buildCityDoc(E, city, g, extra = {}) {
       ...(distress ? { distress: 1 } : {}),
       // The player's deeds, marked: the renderer may celebrate them.
       ...(g.holdings[bbl] ? { held: 1 } : {}),
+      ...(g.developments?.[bbl] ? { developing: 1 } : {}),
       class: p.class,
       ...(p.mix ? { mix: p.mix } : {}),
       floors: p.floors,
@@ -82,6 +83,7 @@ export function hudOf(E, city, g) {
     occN++;
   }
   const { nw, line, cf, book, attn } = readVitals(E, city, g);
+  const yo = yearOneOf(E, g, nw);
   return {
     city: city.name,
     firm: g.firmName ?? "your firm",
@@ -104,7 +106,34 @@ export function hudOf(E, city, g) {
     // The inbox: routed items the glance rail can Open.
     attention: attn.map((a) => a.label),
     attentionItems: attn,
+    yearOne: yo.yearOne,
+    monthsLeft: yo.monthsLeft,
+    next: yo.next,
   };
+}
+
+const YEAR_ONE_IDS = ["deed1", "lease1", "tower1", "exit1", "nw25"];
+
+function milestonePage(id) {
+  if (id === "deed1") return "market";
+  return "portfolio";
+}
+
+/** Next year-one rung. The engine's test function decides; we paint the label. */
+function yearOneOf(E, g, nw) {
+  const month = g.month ?? 0;
+  const yearOne = month < 12;
+  let next = null;
+  try {
+    for (const m of (E.MILESTONES ?? [])) {
+      if (!YEAR_ONE_IDS.includes(m.id)) continue;
+      if (typeof m.test === "function" && !m.test(g, nw ?? 0)) {
+        next = { id: m.id, label: m.label, page: milestonePage(m.id) };
+        break;
+      }
+    }
+  } catch { /* */ }
+  return { yearOne, monthsLeft: yearOne ? Math.max(0, 12 - month) : 0, next };
 }
 
 function readVitals(E, city, g) {
@@ -156,6 +185,49 @@ export function writeDesks(E, city, g, dir) {
   writeFileSync(join(dir, "desks", "economy.json"), JSON.stringify(economyDesk(g)));
   writeFileSync(join(dir, "desks", "debt.json"), JSON.stringify(debtDesk(E, city, g, line)));
   writeFileSync(join(dir, "desks", "books.json"), JSON.stringify(booksDesk(g, nw, cf)));
+  writeFileSync(join(dir, "desks", "map.json"), JSON.stringify(mapDesk(E, city, g, attn)));
+}
+
+function mapDesk(E, city, g, attn) {
+  const deliveries = [];
+  for (const d of Object.values(g.developments ?? {})) {
+    const rec = E.resolveRec(city.parcels, g, d.bbl);
+    const address = rec?.address ?? d.bbl;
+    deliveries.push({
+      bbl: d.bbl,
+      address,
+      deliverM: d.deliverM ?? null,
+      label: `${address} · delivers ${d.deliverM != null ? monthLabel(d.deliverM) : "?"}`,
+    });
+  }
+  deliveries.sort((a, b) => (a.deliverM ?? 0) - (b.deliverM ?? 0));
+  const balloons = [];
+  for (const h of holdingsOf(g)) {
+    if (!h.loan) continue;
+    const months = (h.loan.maturityM ?? 0) - (g.month ?? 0);
+    if (months <= 0 || months > 18) continue;
+    const rec = E.resolveRec(city.parcels, g, h.bbl);
+    const address = rec?.address ?? h.bbl;
+    balloons.push({
+      bbl: h.bbl,
+      address,
+      months,
+      label: `${address} · balloon ${monthLabel(h.loan.maturityM)} (${months} mo)`,
+    });
+  }
+  balloons.sort((a, b) => a.months - b.months);
+  let deliveredSf = 0;
+  for (const h of holdingsOf(g)) {
+    if (h.deliveredM === undefined) continue;
+    const b = g.built?.[h.bbl];
+    if (b) deliveredSf += b.bldgArea ?? 0;
+  }
+  return {
+    attentionN: (attn ?? []).length,
+    deliveries: deliveries.slice(0, 3),
+    balloons: balloons.slice(0, 3),
+    deliveredSf: Math.round(deliveredSf),
+  };
 }
 
 function marketRows(E, city, g) {

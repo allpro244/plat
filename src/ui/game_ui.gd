@@ -20,6 +20,7 @@ signal break_ground_pressed(size: String, density: String, cash: int)
 signal continue_pressed(path: String)
 signal close_parcel_pressed
 signal lens_pressed(name: String, on: bool)
+signal map_filter_pressed(name: String)
 signal attention_opened(item: Dictionary)
 
 var start: StartMenu
@@ -52,6 +53,10 @@ var _full_btn: Button
 
 var _inbox: Panel
 var _inbox_body: VBoxContainer
+var _map_hud: Panel
+var _map_hud_body: VBoxContainer
+var _map_filter := "city"
+var _parcel_kept := false
 
 var _page: Control
 var _page_kicker: Label
@@ -77,6 +82,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_topbar()
 	_build_inbox()
+	_build_map_hud()
 	_build_parcel()
 	_build_page()
 	start = StartMenu.new()
@@ -93,6 +99,8 @@ func set_playing(on: bool) -> void:
 	start.visible = not on
 	_topbar.visible = on
 	_inbox.visible = on
+	if _map_hud:
+		_map_hud.visible = on
 	if not on:
 		_parcel.visible = false
 		_page.visible = false
@@ -189,6 +197,10 @@ func _build_topbar() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row2.add_child(spacer)
 
+	var map_btn := _lens("Map", false)
+	map_btn.pressed.connect(hide_page)
+	row2.add_child(map_btn)
+
 	_advance_btn = Button.new()
 	_advance_btn.text = "Advance ▸"
 	_advance_btn.add_theme_stylebox_override("normal", BwTheme.advance_btn())
@@ -259,6 +271,28 @@ func _build_inbox() -> void:
 	_inbox_body = VBoxContainer.new()
 	_inbox_body.add_theme_constant_override("separation", 6)
 	pad.add_child(_inbox_body)
+
+
+func _build_map_hud() -> void:
+	_map_hud = Panel.new()
+	_map_hud.set_anchors_preset(PRESET_TOP_LEFT)
+	_map_hud.offset_left = 14
+	_map_hud.offset_top = 232
+	_map_hud.offset_right = 360
+	_map_hud.offset_bottom = 360
+	_map_hud.add_theme_stylebox_override("panel", BwTheme.panel_bg(0.94))
+	_map_hud.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_map_hud)
+	var pad := MarginContainer.new()
+	pad.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	pad.add_theme_constant_override("margin_left", 12)
+	pad.add_theme_constant_override("margin_right", 12)
+	pad.add_theme_constant_override("margin_top", 10)
+	pad.add_theme_constant_override("margin_bottom", 10)
+	_map_hud.add_child(pad)
+	_map_hud_body = VBoxContainer.new()
+	_map_hud_body.add_theme_constant_override("separation", 6)
+	pad.add_child(_map_hud_body)
 
 
 func _build_parcel() -> void:
@@ -455,7 +489,9 @@ func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
 	if items.is_empty():
 		for s in hud.get("attention", []):
 			items.append({"label": str(s), "page": "market", "bbl": ""})
-	set_inbox(items)
+	var nxt: Variant = hud.get("next", {})
+	set_inbox(items, bool(hud.get("yearOne", false)), int(hud.get("monthsLeft", 0)),
+			nxt if nxt is Dictionary else {})
 
 
 func _set_stat(key: String, value: String, bad: bool = false) -> void:
@@ -492,24 +528,32 @@ func set_listings_lens(on: bool) -> void:
 		_style_btn(_lens_btns["listings"], on, false)
 
 
-func set_inbox(items: Array) -> void:
+func set_inbox(items: Array, year_one: bool = false, months_left: int = 0, next: Dictionary = {}) -> void:
 	_clear(_inbox_body)
 	var kick := Label.new()
-	kick.text = "ON YOUR DESK" if not items.is_empty() else "YEAR ONE"
+	if year_one:
+		kick.text = "YEAR ONE · %d MO LEFT" % months_left
+	elif not items.is_empty():
+		kick.text = "ON YOUR DESK · %d" % items.size()
+	else:
+		kick.text = "ON YOUR DESK"
 	kick.add_theme_font_override("font", BwTheme.mono())
 	kick.add_theme_font_size_override("font_size", 9)
 	kick.add_theme_color_override("font_color", BwTheme.GOLD)
 	_inbox_body.add_child(kick)
 	if items.is_empty():
 		var hint := Label.new()
-		hint.text = "Nothing waiting. Open Acquire to read the tape."
+		var nxt_label := str(next.get("label", "")) if not next.is_empty() else ""
+		hint.text = nxt_label if nxt_label != "" else "Keep the city in view — buy, lease, or build."
 		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		BwTheme.style_label(hint, 12, false, true)
 		_inbox_body.add_child(hint)
-		var go := _lens("Acquire", false)
-		go.pressed.connect(func() -> void: open_page("market"))
+		var page := str(next.get("page", "market")) if not next.is_empty() else "market"
+		var go := _lens("Acquire" if page == "market" else "Open", false)
+		go.pressed.connect(func() -> void: open_page(page))
 		_inbox_body.add_child(go)
-		_inbox.offset_bottom = 220
+		_inbox.offset_bottom = 232
+		_place_map_hud()
 		return
 	for it in items:
 		var row := HBoxContainer.new()
@@ -527,13 +571,91 @@ func set_inbox(items: Array) -> void:
 			open_page(str(captured.get("page", "market"))))
 		row.add_child(open)
 		_inbox_body.add_child(row)
-	_inbox.offset_bottom = 108 + 36 + items.size() * 36
+	_inbox.offset_bottom = 108 + 48 + items.size() * 40
+	_place_map_hud()
+
+
+func _place_map_hud() -> void:
+	if _map_hud == null:
+		return
+	_map_hud.offset_top = _inbox.offset_bottom + 8
+
+
+func set_map_hud(doc: Dictionary) -> void:
+	_clear(_map_hud_body)
+	var kick := Label.new()
+	kick.text = "CITY"
+	kick.add_theme_font_override("font", BwTheme.mono())
+	kick.add_theme_font_size_override("font_size", 9)
+	kick.add_theme_color_override("font_color", BwTheme.GOLD)
+	_map_hud_body.add_child(kick)
+	var filters := HBoxContainer.new()
+	filters.add_theme_constant_override("separation", 6)
+	_map_hud_body.add_child(filters)
+	for pair in [["city", "City"], ["book", "Book"], ["cranes", "Cranes"]]:
+		var id: String = str(pair[0])
+		var b := _lens(str(pair[1]), _map_filter == id)
+		b.pressed.connect(func() -> void:
+			_map_filter = id
+			map_filter_pressed.emit(id)
+			set_map_hud(doc))
+		filters.add_child(b)
+	var deliveries: Array = doc.get("deliveries", [])
+	if not deliveries.is_empty():
+		var h := Label.new()
+		h.text = "UNDER CONSTRUCTION"
+		BwTheme.style_label(h, 10, false, true)
+		_map_hud_body.add_child(h)
+		for d in deliveries:
+			_hud_row(str(d.get("label", d.get("address", "?"))), str(d.get("bbl", "")), "")
+	var balloons: Array = doc.get("balloons", [])
+	if not balloons.is_empty():
+		var h := Label.new()
+		h.text = "BALLOONS · 18 MO"
+		BwTheme.style_label(h, 10, false, true)
+		_map_hud_body.add_child(h)
+		for d in balloons:
+			_hud_row(str(d.get("label", d.get("address", "?"))), str(d.get("bbl", "")), "debt")
+	var built := float(doc.get("deliveredSf", 0))
+	if built > 0.0:
+		_note_in(_map_hud_body, "Your deliveries · %s sf" % _fmt_sf(built))
+	var rows := 2 + deliveries.size() + balloons.size()
+	_map_hud.offset_bottom = _map_hud.offset_top + 56 + rows * 28
+	_place_map_hud()
+
+
+func _hud_row(text: String, bbl: String, page: String) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_stylebox_override("normal", BwTheme.start_opt(false))
+	b.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
+	b.add_theme_color_override("font_color", BwTheme.INK)
+	b.add_theme_font_override("font", BwTheme.sans())
+	b.add_theme_font_size_override("font_size", 12)
+	b.pressed.connect(func() -> void:
+		if bbl != "" and bbl != "<null>":
+			listing_chosen.emit(bbl)
+		if page != "":
+			open_page(page)
+		else:
+			hide_page())
+	_map_hud_body.add_child(b)
+
+
+func _note_in(parent: Node, text: String) -> void:
+	var lab := Label.new()
+	lab.text = text
+	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	BwTheme.style_label(lab, 12, true, true)
+	parent.add_child(lab)
 
 
 func show_parcel(b: Dictionary, campaign: bool) -> void:
 	_parcel_data = b
 	_campaign = campaign
-	_parcel.visible = true
+	_parcel_kept = true
+	_parcel.visible = not _page.visible
 	var addr := str(b.get("address", "")).strip_edges()
 	var cls := str(b.get("cls", "?"))
 	_parcel_address.text = addr if addr != "" else _class_title(cls)
@@ -609,6 +731,7 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 
 func hide_parcel() -> void:
 	_parcel.visible = false
+	_parcel_kept = false
 	_parcel_data = {}
 
 
@@ -645,6 +768,11 @@ func open_page(page: String, tab: String = "") -> void:
 			_prop_tab = "overview"
 	_page_name = page
 	_page.visible = true
+	_inbox.visible = false
+	if _map_hud:
+		_map_hud.visible = false
+	_parcel_kept = _parcel.visible or _parcel_kept
+	_parcel.visible = false
 	var meta := _page_meta(page)
 	_page_kicker.text = meta[0]
 	_page_title.text = meta[1]
@@ -659,6 +787,11 @@ func hide_page() -> void:
 	_page_name = ""
 	for id in _job_btns:
 		_style_btn(_job_btns[id], false, false)
+	if _campaign:
+		_inbox.visible = true
+		if _map_hud:
+			_map_hud.visible = true
+		_parcel.visible = _parcel_kept
 
 
 func current_page() -> String:

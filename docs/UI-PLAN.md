@@ -456,6 +456,19 @@ Still stubs: Deals, Notes, Leasing, Staff, Research. LOI and lease
 extend are the next write verbs. Do not open those rooms as pretty
 empty tables.
 
+U5 leftover + U9 inbox / map HUD (this cut): the city tells you
+what to do, and a room owns the screen.
+
+- Year-one inbox reads the engine's next milestone (`MILESTONES.test`),
+  not "Nothing waiting." Months left are `12 - month`. The button
+  routes to the desk that milestone lives on.
+- Map HUD under the inbox: deliveries, balloons inside 18 months,
+  City / Book / Cranes filters. Book is the owners overlay; Cranes
+  tints jobs under construction. Numbers come from `desks/map.json`.
+- Opening a desk room hides the glance, inbox, and map HUD. Closing
+  it puts them back. The sheet sits on a washed city, not a collage.
+- **Map** on the bar closes the room.
+
 ---
 
 ## 9. Current evidence
@@ -472,4 +485,6 @@ empty tables.
 - `renders/ui_build.png` — underwritten programmes on vacant dirt
 - `renders/ui_refi.png` — Refinance tab: First Harbor land loan
 - `renders/ui_market.png` — tape with class chips and aligned columns
+- `renders/ui_inbox.png` — year-one milestone on the map
+- `renders/ui_map.png` — inbox + map HUD after the first deed
 - `renders/playable_selftest.png` — the click path that produced them

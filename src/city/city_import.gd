@@ -147,6 +147,7 @@ static func load_city(path: String) -> CityImport:
 			"sqft": float(par.get("bldgArea", 0.0)),
 			"lot_sqft": float(par.get("lotArea", 0.0)),
 			"held": int(par.get("held", 0)) == 1,
+			"developing": int(par.get("developing", 0)) == 1,
 			"value": float(par.get("value", -1.0)),
 			"ask": float(par.get("ask", -1.0)),
 			"listed": int(par.get("listed", 0)) == 1,
