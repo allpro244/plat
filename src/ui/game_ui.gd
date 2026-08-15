@@ -7,6 +7,7 @@ signal advance_pressed
 signal year_pressed
 signal skip_pressed
 signal buy_pressed
+signal approach_pressed
 signal offer_pressed
 signal walk_pressed
 signal accept_counter_pressed
@@ -50,6 +51,7 @@ var _grid: GridContainer
 var _deal_head: Label
 var _deal_note: Label
 var _buy_btn: Button
+var _approach_btn: Button
 var _offer_btn: Button
 var _walk_btn: Button
 var _accept_counter_btn: Button
@@ -392,6 +394,10 @@ func _build_parcel() -> void:
 	_deal_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	BwTheme.style_label(_deal_note, 12, false, true)
 	body.add_child(_deal_note)
+	_approach_btn = _lens("Approach the owner", false)
+	_approach_btn.visible = false
+	_approach_btn.pressed.connect(func() -> void: approach_pressed.emit())
+	body.add_child(_approach_btn)
 	_offer_btn = _ink_buy("Offer at ask")
 	_offer_btn.visible = false
 	_offer_btn.pressed.connect(func() -> void: offer_pressed.emit())
@@ -795,6 +801,13 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 		_add_chip("UNDER CONSTRUCTION", BwTheme.GOLD)
 	if b.get("distress", false):
 		_add_chip("MOTIVATED", BwTheme.DANGER)
+	var ap := _approach_of(b)
+	if int(ap.get("refused", 0)) == 1:
+		_add_chip("NOT SELLING", BwTheme.DANGER)
+	elif int(ap.get("blind", 0)) == 1:
+		_add_chip("WILL TALK", BwTheme.TEAL)
+	elif float(ap.get("ask", 0)) > 0.0 and not bool(b.get("listed", false)):
+		_add_chip("THEIR NUMBER", BwTheme.TEAL)
 	_clear(_grid)
 	_grid_row("Building", _fmt_sf(float(b.get("sqft", 0.0))) + " sf")
 	_grid_row("Lot", _fmt_sf(float(b.get("lot_sqft", 0.0))) + " sf")
@@ -817,6 +830,8 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 	var offer := float(b.get("offer", -1.0))
 	var land: bool = str(b.get("cls", "")) == "land"
 	_buy_btn.visible = false
+	_buy_btn.text = "Buy at ask"
+	_approach_btn.visible = false
 	_offer_btn.visible = false
 	_walk_btn.visible = false
 	_accept_counter_btn.visible = false
@@ -865,12 +880,25 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 		if _list_btn.visible:
 			_list_btn.text = "List at %s" % _usd(float(b.get("listAsk", b.get("value", 0.0))))
 		_build_btn.visible = campaign and land and not bool(b.get("developing", false))
+	elif int(ap.get("refused", 0)) == 1:
+		_deal_head.text = "Not selling"
+		_deal_note.text = "The door is shut until %s." % str(ap.get("until", "later"))
+	elif int(ap.get("blind", 0)) == 1:
+		_deal_head.text = "Make me an offer"
+		_deal_note.text = "They will talk — and will not put a number on it. A bid waits; plat will not invent one."
+	elif float(ap.get("ask", 0)) > 0.0:
+		_deal_head.text = "Off-market"
+		_deal_note.text = "They would take %s. The number holds until %s." % [
+				_usd(float(ap["ask"])), str(ap.get("until", "?"))]
+		_buy_btn.text = "Buy at their number"
+		_buy_btn.visible = campaign
 	elif has_ask:
 		_deal_head.text = "Off-market"
 		_deal_note.text = "Indicative ask %s" % _usd(float(b["ask"]))
 	else:
-		_deal_head.text = ""
-		_deal_note.text = ""
+		_deal_head.text = "Off-market"
+		_deal_note.text = "Not on the tape. Approach the owner — they name a number, or they do not."
+		_approach_btn.visible = campaign
 
 
 func hide_parcel() -> void:
@@ -898,6 +926,7 @@ func show_error(title: String, detail: String) -> void:
 	_deal_head.text = ""
 	_deal_note.text = detail
 	_buy_btn.visible = false
+	_approach_btn.visible = false
 	_offer_btn.visible = false
 	_walk_btn.visible = false
 	_accept_counter_btn.visible = false
@@ -1713,7 +1742,26 @@ func _paint_prop_deal(b: Dictionary, held: bool, listed: bool) -> void:
 		else:
 			_note("No appraisal to list against.")
 	else:
-		_note("This lot is not for sale.")
+		var ap := _approach_of(b)
+		if int(ap.get("refused", 0)) == 1:
+			_note("They are not selling. The door is shut until %s." % str(ap.get("until", "later")))
+		elif int(ap.get("blind", 0)) == 1:
+			_note("They will talk — and will not put a number on it. A bid waits; plat will not invent one.")
+		elif float(ap.get("ask", 0)) > 0.0:
+			_kv("Their number", _usd(float(ap["ask"])))
+			_note("The number holds until %s. Pay it and the deed moves. A counter waits." % str(ap.get("until", "?")))
+			var buy := _ink_buy("Buy at their number")
+			buy.pressed.connect(func() -> void:
+				hide_page()
+				buy_pressed.emit())
+			_page_body.add_child(buy)
+		else:
+			_note("Not on the tape. Approach the owner — they name a number, or they do not.")
+			var knock := _lens("Approach the owner", false)
+			knock.pressed.connect(func() -> void:
+				hide_page()
+				approach_pressed.emit())
+			_page_body.add_child(knock)
 
 
 func _paint_prop_roll(b: Dictionary) -> void:
@@ -2200,6 +2248,11 @@ static func _class_title(cls: String) -> String:
 static func _talk_of(b: Dictionary) -> Dictionary:
 	var t: Variant = b.get("talk", {})
 	return t if t is Dictionary else {}
+
+
+static func _approach_of(b: Dictionary) -> Dictionary:
+	var a: Variant = b.get("approach", {})
+	return a if a is Dictionary else {}
 
 
 static func _usd(v: float) -> String:

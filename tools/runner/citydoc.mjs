@@ -28,6 +28,7 @@ export function buildCityDoc(E, city, g, extra = {}) {
     if (li) { ask = Math.round(li.ask); listed = 1; distress = li.distress ? 1 : 0; }
     else if (sale?.ask) { ask = Math.round(sale.ask); listed = 1; }
     else if (g.approaches?.[bbl]?.ask) ask = Math.round(g.approaches[bbl].ask);
+    const approach = approachView(g, bbl);
     parcels[bbl] = {
       occ,
       ...(cond != null ? { cond } : {}),
@@ -39,6 +40,7 @@ export function buildCityDoc(E, city, g, extra = {}) {
       ...(g.holdings[bbl] ? { held: 1 } : {}),
       ...(g.developments?.[bbl] ? { developing: 1 } : {}),
       ...(g.talks?.[bbl] ? { talk: 1, contracted: g.talks[bbl].agreed ? 1 : 0 } : {}),
+      ...(approach ? { approach } : {}),
       class: p.class,
       ...(p.mix ? { mix: p.mix } : {}),
       floors: p.floors,
@@ -207,6 +209,31 @@ function enrichAttention(E, city, g, a, page, bbl) {
     }
   }
   return item;
+}
+
+/**
+ * Off-market conversation, view-model only. Never export reserve — that
+ * number stays in the owner's head (engine/types.ts Approach).
+ */
+function approachView(g, bbl) {
+  const a = g.approaches?.[bbl];
+  if (!a) return null;
+  const untilM = a.coldUntilM ?? ((a.q ?? 0) + 6);
+  const row = {
+    q: a.q ?? 0,
+    until: monthLabel(untilM),
+    untilM,
+    refused: a.refused ? 1 : 0,
+    inbound: a.inbound ? 1 : 0,
+    named: a.named ? 1 : 0,
+  };
+  if (a.refused) return row;
+  if (a.ask != null && a.ask > 0) {
+    row.ask = Math.round(a.ask);
+    return row;
+  }
+  row.blind = 1;
+  return row;
 }
 
 function listedAsk(g, bbl) {

@@ -167,6 +167,7 @@ static func load_city(path: String) -> CityImport:
 			# the engine when the export ran with --months. Drives dusk
 			# windows; absent in old exports -> -1 sentinel.
 			"occ": float(par.get("occ", -1.0)),
+			"approach": par.get("approach", {}),
 		})
 	var esp_m2 := 0.0
 	for r in ci.esplanade:

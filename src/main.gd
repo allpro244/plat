@@ -128,6 +128,7 @@ func _ready() -> void:
 	_ui.year_pressed.connect(func() -> void: _advance_or_decide(12, true))
 	_ui.skip_pressed.connect(func() -> void: _advance_or_decide(36, true))
 	_ui.buy_pressed.connect(_buy_selected)
+	_ui.approach_pressed.connect(_approach_selected)
 	_ui.offer_pressed.connect(_offer_selected)
 	_ui.walk_pressed.connect(_walk_selected)
 	_ui.accept_counter_pressed.connect(_accept_counter)
@@ -304,6 +305,9 @@ func _run_selftest() -> void:
 			_pick_building(cam.unproject_position(world))
 			if _ui.is_parcel_visible():
 				print("[plat] selftest pick: ", _ui.parcel_debug_text())
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_glance.png")
 				break
 		if not _ui.is_parcel_visible():
 			printerr("[plat] selftest pick FAILED: no building card")
@@ -335,6 +339,9 @@ func _run_selftest() -> void:
 		_pick_affordable_listing()
 		if not _selected.is_empty():
 			print("[plat] selftest listing: ", _ui.parcel_debug_text())
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_card.png")
 			ContextGen.overlay = "owners"
 			await _offer_selected()
 			while _busy:
@@ -515,6 +522,25 @@ func _run_selftest() -> void:
 							str(q.get("id")), float(_hud_game.get("cash", 0)) / 1e6,
 							str(_debt.get("totals", {}))])
 					break
+			_pick_approachable()
+			if not _selected.is_empty() and not bool(_selected.get("held", false)):
+				print("[plat] selftest knock card: ", _ui.parcel_debug_text())
+				_ui.hide_page()
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_knock.png")
+				await _approach_selected()
+				while _busy:
+					await get_tree().process_frame
+				print("[plat] selftest approach: ", _ui.parcel_debug_text())
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_approach.png")
+				_ui.open_page("property", "acquire")
+				_on_page_opened("property")
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_property.png")
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
@@ -1168,10 +1194,27 @@ func _respond_loi(id: int, action: String) -> void:
 	await _run_verb("respond-loi", PackedStringArray(["--id=%d" % id, "--action=" + act]))
 
 
+func _approach_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if _selected.get("held", false) or _selected.get("listed", false):
+		return
+	await _run_verb("approach", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _their_ask(b: Dictionary) -> float:
+	var ap: Variant = b.get("approach", {})
+	if ap is Dictionary:
+		return float((ap as Dictionary).get("ask", 0))
+	return 0.0
+
+
 func _buy_selected() -> void:
 	if _busy or _campaign_dir == "" or _selected.is_empty():
 		return
-	if not _selected.get("listed", false) or _selected.get("held", false):
+	if _selected.get("held", false):
+		return
+	if not _selected.get("listed", false) and _their_ask(_selected) <= 0.0:
 		return
 	var bbl := str(_selected.get("bbl", ""))
 	_busy = true
@@ -1403,6 +1446,36 @@ func _pick_affordable_listing() -> void:
 	_target = c
 	_push()
 	_show_card(best)
+
+
+func _pick_approachable() -> void:
+	if city == null or city._import == null:
+		return
+	var best: Dictionary = {}
+	var best_sf := 0.0
+	for b in city._import.buildings:
+		if b.get("deco", false) or b.get("held", false) or b.get("listed", false):
+			continue
+		if str(b.get("bbl", "")) == "":
+			continue
+		var ap: Variant = b.get("approach", {})
+		if ap is Dictionary and not (ap as Dictionary).is_empty():
+			continue
+		var sf := float(b.get("sqft", 0.0))
+		if sf < 4000.0:
+			continue
+		if sf > best_sf:
+			best = b
+			best_sf = sf
+	if best.is_empty():
+		_selected = {}
+		return
+	var c := (best["bbox"] as Rect2).get_center()
+	_g_target = c
+	_target = c
+	_push()
+	_show_card(best)
+
 
 func _update_hud() -> void:
 	if city == null or city.rig == null or _ui == null:

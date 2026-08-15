@@ -286,6 +286,33 @@ if (cmd === "new") {
   g = r.s;
   writeAll(meta, city, g);
   console.log(`DEVELOPING ${bbl}: ${floors}-floor ${use}`);
+} else if (cmd === "approach") {
+  // KNOCK. The engine names their ask, refuses, or says make-me-an-offer.
+  // Reserve is not written to result.json.
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.approachOwner(g, city.parcels, city.adjacency, bbl);
+  const result = {
+    op: "approach", bbl,
+    ok: !r.err,
+    err: r.err ?? null,
+    refused: !!r.refused,
+    blind: !!r.blind,
+    ask: r.ask != null ? Math.round(r.ask) : null,
+  };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("APPROACH FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  if (r.refused) console.log(`APPROACHED ${bbl} — not selling`);
+  else if (r.blind) console.log(`APPROACHED ${bbl} — make me an offer`);
+  else console.log(`APPROACHED ${bbl} — they would take $${((r.ask ?? 0) / 1e6).toFixed(2)}M`);
 } else if (cmd === "offer") {
   // OFFER AT ASK (or --price=). The engine negotiates; asking price is the
   // listing ask, not a coefficient we invent. A number at or above their

@@ -476,7 +476,7 @@ past it — the bar says Decide until you Accept, Pass, or
 Decide later. The card paints the exported letter, not a
 paragraph we wrote. Decide later leaves it on Deals.
 
-U12 (this cut): the property file grows two tabs the engine
+U12 (shipped): the property file grows two tabs the engine
 already knows how to fill. **Deed history** is
 `propertyTimeline` + `describePropertyEvent` — trades, major
 leases, construction, planning, enforcement. **Money** is
@@ -485,6 +485,14 @@ leases, construction, planning, enforcement. **Money** is
 slider stays out: B&W's `defaultOffer` / `counterPriceBounds`
 live in the web UI, not the engine, and plat will not invent
 them.
+
+U13 (this cut): off-market approach. Click a building that is
+not on the tape → **Approach the owner**. `approachOwner`
+returns their ask, a refusal, or "make me an offer." Reserve
+is not exported. If they named a number, **Buy at their
+number** is `executePurchase` at that ask (the existing `buy`
+path with `offMarket`). A blind bid waits — plat will not
+invent one.
 
 U5 leftover + U9 inbox / map HUD (this cut): the city tells you
 what to do, and a room owns the screen.
@@ -523,4 +531,9 @@ what to do, and a room owns the screen.
 - `renders/ui_decision.png` — the letter takes the screen
 - `renders/ui_history.png` — deed history on 76 Ropewalk after the buy
 - `renders/ui_money.png` — quarterly stamps on the same hold
+- `renders/ui_glance.png` — click a building: the glance card
+- `renders/ui_card.png` — listed lot glance (Offer / Buy at ask)
+- `renders/ui_knock.png` — unlisted building, Approach the owner
+- `renders/ui_approach.png` — after the knock: their number, a refusal, or make-me-an-offer
+- `renders/ui_property.png` — Full view / Acquire on that deed
 - `renders/playable_selftest.png` — the click path that produced them
