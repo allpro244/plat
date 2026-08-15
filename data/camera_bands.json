@@ -1,0 +1,21 @@
+{
+  "comment": "Optional framing presets (near / mid / far), not a clamp. The camera is free-flow: continuous pitch and distance, plus a WASD free-fly mode. 1/2/3 and F ease to these midpoints; nothing locks the rig into a band. Heights and radii in meters from the look-at target.",
+  "target_height_m": 20.0,
+  "bands": [
+    {
+      "name": "near",
+      "height_m": [70, 160],
+      "radius_m": [130, 300]
+    },
+    {
+      "name": "mid",
+      "height_m": [160, 450],
+      "radius_m": [300, 900]
+    },
+    {
+      "name": "far",
+      "height_m": [450, 1200],
+      "radius_m": [900, 2600]
+    }
+  ]
+}

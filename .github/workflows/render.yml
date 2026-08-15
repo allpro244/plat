@@ -1,0 +1,68 @@
+name: render
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  shoot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup (Godot + lavapipe + Xvfb)
+        run: sudo bash tools/setup-linux.sh
+      - name: Fetch pinned CC0 assets
+        run: bash tools/fetch-assets.sh
+      - name: Headless render
+        run: bash tools/shoot.sh --out=renders/ci/latest.png
+      - name: Determinism gate
+        run: bash tools/shoot.sh --check
+      - name: Attach renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: renders
+          path: |
+            renders/ci/*.png
+            renders/*.png
+      - name: Commit CI render back to the branch
+        # The CI runner reaches the primary asset CDN, which the dev sandbox
+        # cannot — committing the render back is how those images get seen.
+        # GITHUB_TOKEN pushes do not retrigger workflows, so this cannot loop.
+        run: |
+          git config user.name "ci-render"
+          git config user.email "ci-render@users.noreply.github.com"
+          git add -f renders/ci/latest.png
+          if git diff --cached --quiet; then
+            echo "render unchanged"
+          else
+            git commit -m "CI render for $GITHUB_SHA (primary asset profile)"
+            # Untracked build products (.godot/, *.uid, render sidecars) can
+            # collide with commits that land on the branch mid-run and abort
+            # the rebase — that exact race failed run 31708198198. Clean them
+            # (everything of value is committed or uploaded by now) and retry
+            # the pull+push a few times to ride out concurrent runs.
+            git clean -fdx -e renders/ci
+            for i in 1 2 3 4; do
+              git pull --rebase origin "${GITHUB_REF_NAME}" \
+                && git push origin "HEAD:${GITHUB_REF_NAME}" && break
+              echo "push attempt $i failed, retrying"; sleep $((i * 5))
+            done
+          fi
+      - name: Perceptual baseline gate
+        # LAST on purpose: a gate that fails before publishing its evidence
+        # is a bad instrument. The render is uploaded and committed above,
+        # so a failing gate always leaves the picture it objected to.
+        # Fails when the default render drifts from the committed baseline
+        # beyond tolerance — the instrument that notices a picture changing
+        # when nobody said it would. Regenerating renders/ci/baseline.png
+        # (deliberately, with a commit message saying why) accepts a change.
+        run: |
+          if [ -f renders/ci/baseline.png ]; then
+            godot --headless -s tools/imgdiff.gd -- \
+              renders/ci/latest.png renders/ci/baseline.png
+          else
+            echo "no baseline yet — seed renders/ci/baseline.png to arm this gate"
+          fi

@@ -1,0 +1,441 @@
+class_name CityPlan
+## The layout DNA of one city, derived entirely from its seed. This is the
+## layer that makes two cities feel like two PLACES rather than two rerolls
+## of the same place — and, as of v2, the layer that breaks the single
+## Manhattan grid. A city is now several GRID DOMAINS: patches of street
+## grid, each with its own orientation, block size and road rhythm, assigned
+## by nearest-center. Where two domains meet, their grids collide and the
+## streets bend — the irregular seams that real grown cities have and a
+## one-grid city never does. On top of that: 0-2 diagonal boulevards carved
+## straight through whatever fabric they cross, an angled shoreline (not an
+## axis-aligned edge), and parks as world-space rectangles.
+##
+## Owns QUANTITIES AND ASSIGNMENT only (block placement, orientation,
+## district params); what a block's buildings look like remains the
+## generators' business.
+##
+## The hero block's contract is untouchable: domain 0 is the old axis-
+## aligned grid with the contract street widths, and boulevards, water and
+## parks are all kept out of the hero's neighborhood.
+
+const RINGS := 12          # hero-domain CONTRACT half-extent, in blocks
+## Hero-domain lattice half-extent. The contract grid only spans ~1 km of
+## rows; domain 0's Voronoi territory can reach the coast 2.5 km out, and
+## everything past the lattice was silently bare (seen as a flat wedge at
+## the island's north tip). 31 rows x 85 m pitch covers CITY_R.
+const EXT := 31
+const BLOCK_W := 180.0     # hero-domain block size (the contract block)
+const BLOCK_D := 61.0
+const CITY_R := 2600.0     # world radius the plan populates, meters
+
+var seed_value: int
+var domains := []          # {center:Vector2, angle, bw, bd, rx, rz, ave_every, ave_phase}
+var boulevards := []       # {p:Vector2, dir:Vector2 (unit), w}
+var water := {}            # {} or {n:Vector2 (unit), d:float} — water where dot(p,n)>d
+var parks := []            # {center:Vector2, w, d, angle}
+var blocks := []           # {key, x, z, angle, w, d, dist, district}
+var core_center := Vector2.ZERO   # world meters
+var _district_centers := []       # [[Vector2, type], ...]
+var _limit_h := []                # city-limit harmonics: [[amp, freq, phase], ...]
+var _limit_base := 0.88           # mean coastline radius, fraction of CITY_R
+
+## Per-district generation parameters, consumed by ContextGen.
+## height_mul scales the base distribution; cap clamps it; mass_w widens
+## footprints; win_fx shrinks windows (industrial reads near-blind).
+const DISTRICTS := {
+	"core":       {"height_mul": 1.45, "cap": 999.0, "mass_w": [16.0, 36.0], "bay": 1.9,
+			"win_fx": 0.55, "lit": 0.30, "shop_lit": 0.45,
+			"tints": [Color(0.55, 0.56, 0.60), Color(0.42, 0.44, 0.48),
+			Color(0.70, 0.70, 0.72), Color(0.60, 0.55, 0.50)]},
+	"prewar":     {"height_mul": 1.0, "cap": 999.0, "mass_w": [14.0, 34.0], "bay": 2.6,
+			"win_fx": 0.42, "lit": 0.42, "shop_lit": 0.50,
+			"tints": [Color(0.80, 0.68, 0.58), Color(0.95, 0.85, 0.74),
+			Color(1.0, 0.78, 0.62), Color(0.72, 0.69, 0.67)]},
+	"walkup":     {"height_mul": 0.62, "cap": 34.0, "mass_w": [12.0, 24.0], "bay": 2.4,
+			"win_fx": 0.40, "lit": 0.50, "shop_lit": 0.30,
+			"tints": [Color(0.85, 0.72, 0.60), Color(0.75, 0.62, 0.52),
+			Color(0.90, 0.82, 0.70), Color(0.68, 0.60, 0.55)]},
+	"industrial": {"height_mul": 0.50, "cap": 26.0, "mass_w": [40.0, 85.0], "bay": 4.5,
+			"win_fx": 0.30, "lit": 0.06, "shop_lit": 0.08,
+			"tints": [Color(0.62, 0.58, 0.54), Color(0.55, 0.50, 0.46),
+			Color(0.70, 0.66, 0.60), Color(0.58, 0.56, 0.55)]},
+}
+
+## Contemporary tower probability per district (chance a tall mass becomes a
+## podium + glass shaft instead of masonry tiers).
+const TOWER_P := {"core": 0.75, "prewar": 0.18, "walkup": 0.0, "industrial": 0.0}
+
+## Palette FAMILIES: the whole city leans one way, so a seed reads as "the
+## brick city" or "the render city" or "the glass city" at a glance — looser
+## than the old everyone-is-Manhattan tinting. mul multiplies district tints;
+## extra tints join the district's own.
+const FAMILIES := {
+	"masonry": {"mul": Color(1.0, 0.94, 0.88), "extra": [Color(0.62, 0.42, 0.34)]},
+	"render":  {"mul": Color(1.04, 1.02, 0.98), "extra": [Color(0.93, 0.90, 0.84),
+			Color(0.88, 0.86, 0.82), Color(0.97, 0.94, 0.85)]},
+	"cool":    {"mul": Color(0.90, 0.93, 1.0), "extra": [Color(0.55, 0.60, 0.66),
+			Color(0.47, 0.52, 0.58)]},
+	"brick":   {"mul": Color(1.0, 0.82, 0.72), "extra": [Color(0.48, 0.28, 0.22),
+			Color(0.58, 0.34, 0.26)]},
+	"pastel":  {"mul": Color(1.06, 1.0, 0.92), "extra": [Color(0.85, 0.72, 0.55),
+			Color(0.82, 0.62, 0.50), Color(0.78, 0.75, 0.62)]},
+}
+
+## Skyline CULTURE: some cities are low-rise towns, some are supertall
+## metropolises. Multiplies district height params; caps clamp; tower_scale
+## scales the glass-tower probability.
+const HEIGHT_MODES := {
+	"lowrise":   {"mul": 0.45, "cap": 55.0,  "tower_scale": 0.0},
+	"midrise":   {"mul": 0.75, "cap": 110.0, "tower_scale": 0.5},
+	"highrise":  {"mul": 1.0,  "cap": 260.0, "tower_scale": 1.0},
+	"supertall": {"mul": 1.25, "cap": 420.0, "tower_scale": 1.4},
+}
+
+var family := "masonry"
+var height_mode := "highrise"
+var gap_p := 0.0          # chance of a vacant slice between masses
+var era_bias := 0.0       # <0 = old city (victorian-heavy), >0 = young city
+var tree_cover := 1.0     # scales street-tree probability city-wide
+var islets := []          # satellite islands: {center, r, h: harmonics, dom}
+var _params := {}   # district -> family-adjusted params
+
+func _init(city_seed: int) -> void:
+	seed_value = city_seed
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(str(city_seed) + "/plan")
+	# City limit as a smooth function of bearing: 3 seeded harmonics. The
+	# first cut at this hashed a radius per block, which frayed the edge but
+	# left lone blocks floating in empty asphalt; a smooth lobed limit reads as a
+	# city that grew unevenly, with no orphans.
+	_limit_base = rng.randf_range(0.74, 0.96)   # island size is identity too
+	for k in range(3):
+		_limit_h.append([rng.randf_range(0.06, 0.16), float(rng.randi_range(1, 4)),
+				rng.randf_range(0.0, TAU)])
+	family = ["masonry", "render", "cool", "brick", "pastel"][rng.randi_range(0, 4)]
+	# Weighted: most cities mid/high; the extremes are memorable minorities.
+	var hm := rng.randf()
+	height_mode = "lowrise" if hm < 0.15 else ("midrise" if hm < 0.45 \
+			else ("highrise" if hm < 0.85 else "supertall"))
+	gap_p = rng.randf_range(0.0, 0.22)
+	era_bias = rng.randf_range(-0.35, 0.55)
+	tree_cover = rng.randf_range(0.35, 1.15)
+	_bake_params()
+	_make_domains(rng)
+	_make_islets(rng)
+	_make_boulevards(rng)
+	_make_water(rng)
+	_make_parks(rng)
+	_make_districts(rng)
+	_make_blocks()
+
+# --- layout DNA -------------------------------------------------------------
+
+func _make_domains(rng: RandomNumberGenerator) -> void:
+	# Domain 0 is the hero's: axis-aligned, contract block size, contract
+	# street widths near the origin (see _hero_positions). Always present.
+	domains.append({"center": Vector2.ZERO, "angle": 0.0,
+			"bw": BLOCK_W, "bd": BLOCK_D, "rx": 18.0, "rz": 24.0,
+			"ave_every": rng.randi_range(4, 7), "ave_phase": rng.randi_range(0, 6)})
+	# Street-width culture: some cities run tight lanes, some broad ones.
+	var street_mul := rng.randf_range(0.8, 1.25)
+	# 2-4 more domains, each a differently-turned, differently-pitched grid.
+	# Their collisions with each other (and with domain 0) are where the city
+	# stops looking like one endless Manhattan.
+	for k in range(rng.randi_range(2, 4)):
+		var ang := rng.randf_range(0.6, 2.5)                 # 34-143 deg around
+		var r := rng.randf_range(650.0, 2100.0)
+		var center := Vector2(cos(ang * TAU), sin(ang * TAU)).normalized() * r
+		domains.append({
+			"center": center,
+			"angle": deg_to_rad(rng.randf_range(8.0, 42.0)) * (1.0 if rng.randf() < 0.5 else -1.0),
+			"bw": rng.randf_range(110.0, 200.0),
+			"bd": rng.randf_range(55.0, 80.0),
+			"rx": rng.randf_range(15.0, 22.0) * street_mul,
+			"rz": rng.randf_range(18.0, 26.0) * street_mul,
+			"ave_every": rng.randi_range(4, 7),
+			"ave_phase": rng.randi_range(0, 6),
+		})
+
+## 0-2 satellite islets offshore, each with its own mini street grid (a
+## domain of its own, so nearest-center assignment hands it its ground).
+## An archipelago silhouette is unmistakable identity.
+func _make_islets(rng: RandomNumberGenerator) -> void:
+	for k in range(rng.randi_range(0, 2)):
+		var b := rng.randf_range(0.0, TAU)
+		var r := rng.randf_range(320.0, 650.0)
+		var center := Vector2(cos(b), sin(b)) \
+				* (city_limit(b) + r + rng.randf_range(350.0, 900.0))
+		var harm := []
+		for j in range(2):
+			harm.append([rng.randf_range(0.06, 0.18), float(rng.randi_range(1, 3)),
+					rng.randf_range(0.0, TAU)])
+		domains.append({
+			"center": center,
+			"angle": rng.randf_range(-PI * 0.25, PI * 0.25),
+			"bw": rng.randf_range(100.0, 160.0),
+			"bd": rng.randf_range(52.0, 70.0),
+			"rx": rng.randf_range(14.0, 20.0),
+			"rz": rng.randf_range(16.0, 24.0),
+			"ave_every": rng.randi_range(4, 7),
+			"ave_phase": rng.randi_range(0, 6),
+		})
+		islets.append({"center": center, "r": r, "h": harm, "dom": domains.size() - 1})
+
+func islet_limit(islet: Dictionary, bearing: float) -> float:
+	var f := 0.85
+	for h in islet["h"]:
+		f += float(h[0]) * sin(bearing * float(h[1]) + float(h[2]))
+	return float(islet["r"]) * f
+
+## Anywhere on land: the main island or any islet.
+func on_land(p: Vector2, margin: float = 0.0) -> bool:
+	if p.length() < city_limit(atan2(p.y, p.x)) - margin:
+		return true
+	for islet in islets:
+		var d: Vector2 = p - (islet["center"] as Vector2)
+		if d.length() < islet_limit(islet, atan2(d.y, d.x)) - margin:
+			return true
+	return false
+
+func _make_boulevards(rng: RandomNumberGenerator) -> void:
+	# 0-2 wide corridors cut straight across the fabric at a non-grid angle,
+	# Broadway-style. Routed to miss the hero neighborhood.
+	for k in range(rng.randi_range(0, 2)):
+		var ang := rng.randf_range(0.0, TAU)
+		var dir := Vector2(cos(ang), sin(ang))
+		var n := Vector2(-dir.y, dir.x)
+		var offset := rng.randf_range(220.0, 1400.0) * (1.0 if rng.randf() < 0.5 else -1.0)
+		boulevards.append({"p": n * offset, "dir": dir,
+				"w": rng.randf_range(30.0, 44.0)})
+
+func _make_water(_rng: RandomNumberGenerator) -> void:
+	# Every city is an ISLAND: the lobed city limit IS the coastline, and
+	# everything beyond it is harbor. The strongest identity feature a city
+	# silhouette has, and it makes the edge a designed thing (esplanade,
+	# seawall, skyline against water) instead of fabric fading into ground
+	# that belongs to nobody.
+	water = {"island": true}
+
+func _make_parks(rng: RandomNumberGenerator) -> void:
+	# 3-6 parks as world rectangles aligned to their owning domain's grid.
+	for k in range(rng.randi_range(3, 6)):
+		var ang := rng.randf_range(0.0, TAU)
+		var r := rng.randf_range(260.0, 1700.0)
+		var center := Vector2(cos(ang), sin(ang)) * r
+		if _in_water(center):
+			continue
+		parks.append({"center": center,
+				"w": rng.randf_range(150.0, 330.0), "d": rng.randf_range(70.0, 160.0),
+				"angle": float(domains[_nearest_domain(center)]["angle"])})
+
+func _make_districts(rng: RandomNumberGenerator) -> void:
+	var ca := rng.randf_range(0.0, TAU)
+	core_center = Vector2(cos(ca), sin(ca)) * rng.randf_range(0.0, 380.0)
+	_district_centers = [[core_center, "core"]]
+	# Two standing pre-war anchors keep mid-rise fabric the DEFAULT fill;
+	# specialty districts carve into it rather than dominating the map.
+	_district_centers.append([core_center + Vector2(-1150.0, 520.0), "prewar"])
+	_district_centers.append([core_center + Vector2(980.0, -700.0), "prewar"])
+	var others := ["prewar", "walkup", "industrial", "walkup", "prewar"]
+	for k in range(rng.randi_range(3, 4)):
+		var ang := rng.randf_range(0.0, TAU)
+		var c := Vector2(cos(ang), sin(ang)) * rng.randf_range(800.0, 2300.0)
+		_district_centers.append([c, others[rng.randi_range(0, others.size() - 1)]])
+
+# --- block placement --------------------------------------------------------
+
+func _nearest_domain(p: Vector2) -> int:
+	var best := 0
+	var best_d := 1e12
+	for i in range(domains.size()):
+		var d: float = p.distance_squared_to(domains[i]["center"])
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+func _in_water(p: Vector2) -> bool:
+	# Inside a coastline (main or islet), with esplanade-ring margin.
+	return not on_land(p, 55.0)
+
+func _in_park(p: Vector2) -> bool:
+	for pk in parks:
+		var local: Vector2 = (p - pk["center"]).rotated(-float(pk["angle"]))
+		if absf(local.x) < float(pk["w"]) * 0.5 + 8.0 and absf(local.y) < float(pk["d"]) * 0.5 + 8.0:
+			return true
+	return false
+
+func _on_boulevard(p: Vector2, half_w: float, half_d: float) -> bool:
+	for b in boulevards:
+		var n: Vector2 = Vector2(-b["dir"].y, b["dir"].x)
+		if absf((p - (b["p"] as Vector2)).dot(n)) < float(b["w"]) * 0.5 + minf(half_w, half_d):
+			return true
+	return false
+
+func _district_of(p: Vector2) -> String:
+	if p.length() < 260.0:
+		return "prewar"  # the hero's own neighborhood: what its generator builds
+	var best := "prewar"
+	var best_d := 1e12
+	for c in _district_centers:
+		var d: float = p.distance_squared_to(c[0])
+		if d < best_d:
+			best_d = d
+			best = c[1]
+	return best
+
+## Where the city ends in a given direction: a lobed, seeded closed curve
+## (mean ~0.88 CITY_R, lobes ±~20%) — a city that grew unevenly, not a circle.
+func city_limit(bearing: float) -> float:
+	var f := _limit_base
+	for h in _limit_h:
+		f += float(h[0]) * sin(bearing * float(h[1]) + float(h[2]))
+	return CITY_R * f
+
+func _keep(p: Vector2, dom: int, half_w: float, half_d: float) -> bool:
+	if not on_land(p):
+		return false
+	if _nearest_domain(p) != dom:
+		return false  # another domain's grid owns this ground
+	if _in_water(p) or _in_park(p):
+		return false
+	if _on_boulevard(p, half_w, half_d):
+		return false
+	return true
+
+## Hero-domain column/row edges: uniform pitch EXCEPT the streets touching
+## the hero block, which keep the contract widths (18 m north side street,
+## 30 m south avenue; 36 m avenues on the domain rhythm).
+func _hero_positions() -> Dictionary:
+	var d: Dictionary = domains[0]
+	var col_x0 := {0: -BLOCK_W * 0.5}
+	var row_z0 := {0: -BLOCK_D * 0.5}
+	var wx := {}
+	var wz := {}
+	for i in range(-EXT, EXT + 2):
+		wx[i] = 36.0 if posmod(i + int(d["ave_phase"]), int(d["ave_every"])) == 0 else float(d["rx"])
+		wz[i] = float(d["rz"])
+	wz[0] = 18.0   # hero north side street (contract)
+	wz[1] = 30.0   # hero south avenue (contract)
+	for gx in range(1, EXT + 1):
+		col_x0[gx] = col_x0[gx - 1] + BLOCK_W + wx[gx]
+	for gx in range(-1, -EXT - 1, -1):
+		col_x0[gx] = col_x0[gx + 1] - wx[gx + 1] - BLOCK_W
+	for gy in range(1, EXT + 1):
+		row_z0[gy] = row_z0[gy - 1] + BLOCK_D + wz[gy]
+	for gy in range(-1, -EXT - 1, -1):
+		row_z0[gy] = row_z0[gy + 1] - wz[gy + 1] - BLOCK_D
+	return {"col_x0": col_x0, "row_z0": row_z0, "wz": wz}
+
+func _make_blocks() -> void:
+	# Domain 0: the hero grid, axis-aligned, contract widths.
+	var pos := _hero_positions()
+	for gy in range(-EXT, EXT + 1):
+		for gx in range(-EXT, EXT + 1):
+			if gx == 0 and gy == 0:
+				continue  # the hero block itself is BlockGen's
+			var c := Vector2(float(pos["col_x0"][gx]) + BLOCK_W * 0.5,
+					float(pos["row_z0"][gy]) + BLOCK_D * 0.5)
+			_try_block(c, 0, 0.0, BLOCK_W, BLOCK_D, "0/%d/%d" % [gx, gy],
+					float(pos["wz"][gy + 1]))
+	# Other domains: rotated lattices anchored at the domain center.
+	for di in range(1, domains.size()):
+		var d: Dictionary = domains[di]
+		var pitch_x: float = float(d["bw"]) + float(d["rx"])
+		var pitch_z: float = float(d["bd"]) + float(d["rz"])
+		# Cover the WHOLE island from any domain center: a lobe can reach
+		# 1.12x CITY_R while a domain sits 2100 m the other side of it.
+		var n_i := int(ceil((CITY_R * 3.0) / pitch_x))
+		var n_j := int(ceil((CITY_R * 3.0) / pitch_z))
+		var ang: float = float(d["angle"])
+		var u := Vector2(cos(ang), sin(ang))
+		var v := Vector2(-sin(ang), cos(ang))
+		for j in range(-n_j, n_j + 1):
+			for i in range(-n_i, n_i + 1):
+				var extra: float = (36.0 - float(d["rx"])) \
+						* float(posmod(i + int(d["ave_phase"]), int(d["ave_every"])) == 0)
+				var c: Vector2 = (d["center"] as Vector2) \
+						+ u * (float(i) * pitch_x + extra * 0.5) + v * (float(j) * pitch_z)
+				_try_block(c, di, ang, float(d["bw"]) - extra, float(d["bd"]),
+						"%d/%d/%d" % [di, i, j], float(d["rz"]))
+
+## Keep the block whole if its ground passes every test; otherwise SUBDIVIDE:
+## quarter-blocks retest individually, so domain seams, boulevard edges, park
+## edges and the city limit get fronted by smaller, irregular buildings
+## instead of dying wholesale and leaving a bare-asphalt void. This is where
+## the fine grain real cities have at their discontinuities comes from.
+func _try_block(c: Vector2, dom: int, ang: float, w: float, d: float, key: String,
+		road: float = 24.0) -> void:
+	if _keep(c, dom, w * 0.5, d * 0.5):
+		blocks.append(_block(c, ang, w, d, key, road))
+		return
+	if w < 70.0 or d < 34.0:
+		return
+	var hw := w * 0.5
+	var hd := d * 0.5
+	var u := Vector2(cos(ang), sin(ang))
+	var v := Vector2(-sin(ang), cos(ang))
+	var q := 0
+	for sx in [-0.25, 0.25]:
+		for sz in [-0.25, 0.25]:
+			q += 1
+			var sc: Vector2 = c + u * (w * float(sx)) + v * (d * float(sz))
+			if not _keep(sc, dom, hw * 0.5, hd * 0.5):
+				continue
+			# A sub-block may not spill into another domain's territory: its
+			# corners must be owned ground too, or two grids interpenetrate.
+			var ok := true
+			for cx in [-0.5, 0.5]:
+				for cz in [-0.5, 0.5]:
+					if _nearest_domain(sc + u * (hw * float(cx)) + v * (hd * float(cz))) != dom:
+						ok = false
+			if ok:
+				blocks.append(_block(sc, ang, hw - 4.0, hd - 4.0, key + "/q%d" % q, road))
+
+## `road` is the width of the street running along this block's long side —
+## the ground pass needs it to put a centerline down the middle of the
+## roadway rather than a guessed distance from the curb.
+func _block(c: Vector2, ang: float, w: float, d: float, key: String,
+		road: float = 24.0) -> Dictionary:
+	return {"key": key, "x": c.x, "z": c.y, "angle": ang, "w": w, "d": d,
+			"road": road, "dist": c.length(), "district": _district_of(c)}
+
+# --- queries ----------------------------------------------------------------
+
+func _bake_params() -> void:
+	var fam: Dictionary = FAMILIES[family]
+	var hmode: Dictionary = HEIGHT_MODES[height_mode]
+	for dname in DISTRICTS:
+		var p: Dictionary = (DISTRICTS[dname] as Dictionary).duplicate()
+		p["height_mul"] = float(p["height_mul"]) * float(hmode["mul"])
+		p["cap"] = minf(float(p["cap"]), float(hmode["cap"]))
+		# The raw tint tables date from a hotter exposure and run to 1.0 —
+		# paint-white. Real light masonry/render sits near 0.55-0.65 albedo;
+		# 0.62 brings the whole family into that range and the aerial stops
+		# reading as chalk.
+		var tints: Array = []
+		for t in p["tints"]:
+			tints.append((t as Color) * (fam["mul"] as Color) * 0.62)
+		for t in fam["extra"]:
+			tints.append((t as Color) * 0.8)
+		p["tints"] = tints
+		p["tower_p"] = float(TOWER_P[dname]) * float(hmode["tower_scale"])
+		_params[dname] = p
+
+func params_for(b: Dictionary) -> Dictionary:
+	return _params[b["district"]]
+
+## Distance-from-core falloff for the skyline gradient. 0.000375/m matches
+## the old per-ring 0.075 at the ~200 m hero-block pitch.
+func falloff(b: Dictionary) -> float:
+	var dist: float = Vector2(b["x"], b["z"]).distance_to(core_center)
+	return clampf(1.25 - dist * 0.000375, 0.45, 1.25)
+
+func describe() -> String:
+	var per_district := {}
+	for b in blocks:
+		per_district[b["district"]] = int(per_district.get(b["district"], 0)) + 1
+	return "plan seed=%d family=%s mode=%s era=%.2f gap=%.2f trees=%.2f islets=%d domains=%d blocks=%d blvd=%d parks=%d core=(%.0f,%.0f) %s" % [
+			seed_value, family, height_mode, era_bias, gap_p, tree_cover, islets.size(),
+			domains.size(), blocks.size(), boulevards.size(), parks.size(),
+			core_center.x, core_center.y, str(per_district)]
