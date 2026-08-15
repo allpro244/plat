@@ -286,7 +286,80 @@ if (cmd === "new") {
   g = r.s;
   writeAll(meta, city, g);
   console.log(`DEVELOPING ${bbl}: ${floors}-floor ${use}`);
+} else if (cmd === "offer") {
+  // OFFER AT ASK (or --price=). The engine negotiates; asking price is the
+  // listing ask, not a coefficient we invent. A number at or above their
+  // reserve is a handshake and a deposit, not a deed.
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  let price = Math.max(0, parseInt(arg("price", "0"), 10) || 0);
+  if (!(price > 0)) {
+    const li = (g.listings ?? []).find((l) => l.bbl === bbl);
+    const approach = g.approaches?.[bbl];
+    price = Math.round(li?.ask ?? approach?.ask ?? 0);
+  }
+  const r = E.negotiate(g, city.parcels, bbl, price, false);
+  const result = { op: "offer", bbl, price, ok: !r.err, err: r.err ?? null, msg: r.msg ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("OFFER FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`OFFERED ${bbl} at $${(price / 1e6).toFixed(2)}M${r.msg ? " — " + r.msg : ""}`);
+} else if (cmd === "walk") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.walkAway(g, city.parcels, bbl);
+  writeFileSync(join(dir, "result.json"), JSON.stringify({
+    op: "walk", bbl, ok: true, err: null, msg: r.msg ?? null,
+  }));
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`WALKED ${bbl}${r.msg ? " — " + r.msg : ""}`);
+} else if (cmd === "accept-counter") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.acceptCounter(g, city.parcels, bbl);
+  const result = { op: "accept-counter", bbl, ok: !r.err, err: r.err ?? null, msg: r.msg ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("ACCEPT-COUNTER FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`ACCEPTED COUNTER ${bbl}${r.msg ? " — " + r.msg : ""}`);
+} else if (cmd === "close") {
+  // FUND THE AGREED PRICE. product and lev are the engine's closeDeal
+  // arguments; cash / 1 is the unlevered close, not a default we priced.
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const product = arg("product", "cash");
+  const lev = Math.max(0, Math.min(1, parseFloat(arg("lev", "1")) || 1));
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.closeDeal(g, city.parcels, bbl, product, lev);
+  const result = { op: "close", bbl, product, ok: !r.err, err: r.err ?? null, msg: r.msg ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("CLOSE FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`CLOSED ${bbl}${r.msg ? " — " + r.msg : ""}`);
 } else {
-  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
+  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|offer|walk|accept-counter|close|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
   process.exit(1);
 }

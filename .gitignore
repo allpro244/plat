@@ -31,6 +31,7 @@ export_presets.cfg
 !/renders/ui_market.png
 !/renders/ui_inbox.png
 !/renders/ui_map.png
+!/renders/ui_deals.png
 
 # Local checkout of the economy engine (dev path main.gd expects).
 # Public repo; clone it beside plat, do not commit it here.

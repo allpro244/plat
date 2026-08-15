@@ -56,10 +56,11 @@ grows the UI that drives it. Order chosen so each step is playable alone:
 1. **Pricing on the card.** Export `landPsf`, appraisal, cap rate, asking
    price for listed parcels. The parcel card grows its money lines — the
    record becomes an investment memo.
-2. **Buy.** `plat-sim buy --bbl=… --dir=…` calls the engine's purchase path
-   (LOI → accept at ask, v1). Card gets a BUY key when the parcel is listed
-   and cash covers it; a bought building gets the ★ and a rebuild. Failure
-   returns the engine's reason verbatim (underfunded, not listed, rival won).
+2. **Buy.** `plat-sim buy --bbl=… --dir=…` is the cash shortcut at ask.
+   The contract path is `offer` (`negotiate` at the listing ask) → Deals
+   desk → `close` (`closeDeal`). A handshake posts the engine's 1.5%
+   deposit; Close funds the agreed price. Failure returns the engine's
+   reason verbatim.
 3. **Listings layer.** `plat-sim listings` → for-sale parcels; plat tints
    them on the map (the first BW map layer in 3D) and TAB cycles a listings
    rail with prices — click focuses the camera on the parcel.

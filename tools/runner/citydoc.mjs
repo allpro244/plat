@@ -38,6 +38,7 @@ export function buildCityDoc(E, city, g, extra = {}) {
       // The player's deeds, marked: the renderer may celebrate them.
       ...(g.holdings[bbl] ? { held: 1 } : {}),
       ...(g.developments?.[bbl] ? { developing: 1 } : {}),
+      ...(g.talks?.[bbl] ? { talk: 1, contracted: g.talks[bbl].agreed ? 1 : 0 } : {}),
       class: p.class,
       ...(p.mix ? { mix: p.mix } : {}),
       floors: p.floors,
@@ -109,6 +110,7 @@ export function hudOf(E, city, g) {
     yearOne: yo.yearOne,
     monthsLeft: yo.monthsLeft,
     next: yo.next,
+    deals: Object.keys(g.talks ?? {}).length,
   };
 }
 
@@ -186,6 +188,79 @@ export function writeDesks(E, city, g, dir) {
   writeFileSync(join(dir, "desks", "debt.json"), JSON.stringify(debtDesk(E, city, g, line)));
   writeFileSync(join(dir, "desks", "books.json"), JSON.stringify(booksDesk(g, nw, cf)));
   writeFileSync(join(dir, "desks", "map.json"), JSON.stringify(mapDesk(E, city, g, attn)));
+  writeFileSync(join(dir, "desks", "deals.json"), JSON.stringify(dealsDesk(E, city, g)));
+}
+
+/** Live talks, inbound sale offers, and letters — view models only. */
+function dealsDesk(E, city, g) {
+  const talks = [];
+  for (const t of Object.values(g.talks ?? {})) {
+    const rec = E.resolveRec(city.parcels, g, t.bbl);
+    const agreed = !!t.agreed;
+    talks.push({
+      bbl: t.bbl,
+      address: rec?.address ?? t.bbl,
+      cls: rec?.class ?? "",
+      district: rec?.district ?? "",
+      seller: t.sellerName ?? "",
+      yourPrice: Math.round(t.yourPrice ?? 0),
+      theirPrice: Math.round(t.theirPrice ?? 0),
+      agreed,
+      agreedPrice: t.agreedPrice != null ? Math.round(t.agreedPrice) : null,
+      deposit: Math.round(t.deposit ?? 0),
+      closeBy: t.closeByM != null ? monthLabel(t.closeByM) : null,
+      monthsLeft: t.closeByM != null ? t.closeByM - (g.month ?? 0) : null,
+      note: t.note ?? "",
+      final: !!t.final,
+      status: agreed ? "agreed" : (t.final ? "final" : "talking"),
+    });
+  }
+  talks.sort((a, b) => (b.agreed ? 1 : 0) - (a.agreed ? 1 : 0)
+    || (a.monthsLeft ?? 99) - (b.monthsLeft ?? 99));
+  const lois = [];
+  for (const l of (g.lois ?? [])) {
+    const rec = E.resolveRec(city.parcels, g, l.bbl);
+    lois.push({
+      id: l.id,
+      bbl: l.bbl,
+      address: rec?.address ?? l.bbl,
+      name: l.name ?? "",
+      kind: l.kind ?? "new",
+      sf: Math.round(l.sf ?? 0),
+      rentPsf: l.rentPsf ?? null,
+      expires: l.expiresM != null ? monthLabel(l.expiresM) : null,
+      monthsLeft: l.expiresM != null ? l.expiresM - (g.month ?? 0) : null,
+    });
+  }
+  const inbound = [];
+  for (const h of holdingsOf(g)) {
+    const offer = h.sale?.offer;
+    if (!offer) continue;
+    const rec = E.resolveRec(city.parcels, g, h.bbl);
+    inbound.push({
+      bbl: h.bbl,
+      address: rec?.address ?? h.bbl,
+      ask: Math.round(h.sale?.ask ?? 0),
+      price: Math.round(offer.price ?? 0),
+      expires: offer.expiresM != null ? monthLabel(offer.expiresM) : null,
+    });
+  }
+  const committed = talks
+    .filter((t) => t.agreed)
+    .reduce((a, t) => a + (t.agreedPrice ?? 0), 0);
+  return {
+    talks,
+    lois,
+    inbound,
+    counts: {
+      talks: talks.length,
+      agreed: talks.filter((t) => t.agreed).length,
+      lois: lois.length,
+      inbound: inbound.length,
+    },
+    committed,
+    maxTalks: E.MAX_TALKS ?? 4,
+  };
 }
 
 function mapDesk(E, city, g, attn) {

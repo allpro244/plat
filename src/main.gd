@@ -90,6 +90,7 @@ var _books: Dictionary = {}
 var _dev_options: Array = []
 var _refi_quotes: Array = []
 var _map_desk: Dictionary = {}
+var _deals: Dictionary = {}
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -125,6 +126,10 @@ func _ready() -> void:
 	_ui.year_pressed.connect(func() -> void: _advance_campaign(12, true))
 	_ui.skip_pressed.connect(func() -> void: _advance_campaign(36, true))
 	_ui.buy_pressed.connect(_buy_selected)
+	_ui.offer_pressed.connect(_offer_selected)
+	_ui.walk_pressed.connect(_walk_selected)
+	_ui.accept_counter_pressed.connect(_accept_counter)
+	_ui.close_deal_pressed.connect(_close_selected)
 	_ui.list_pressed.connect(_list_selected)
 	_ui.delist_pressed.connect(_delist_selected)
 	_ui.accept_offer_pressed.connect(_accept_offer)
@@ -321,18 +326,29 @@ func _run_selftest() -> void:
 		for i in range(10):
 			await get_tree().process_frame
 		await _save_frame("renders/ui_market.png")
-		# And a DEAL: buy the cheapest listed lot cash covers. Owners
-		# overlay on so the bought lot's gold marker is in the frame.
+		# The contract path: offer at ask → Deals desk → Close.
+		# Buy at ask remains the cash shortcut; this is the handshake.
 		var cash0 := float(_hud_game.get("cash", 0))
 		_pick_affordable_listing()
 		if not _selected.is_empty():
 			print("[plat] selftest listing: ", _ui.parcel_debug_text())
 			ContextGen.overlay = "owners"
-			await _buy_selected()
+			await _offer_selected()
 			while _busy:
 				await get_tree().process_frame
-			print("[plat] selftest buy: cash $%.2fM -> $%.2fM, holdings %d" % [
+			print("[plat] selftest offer: cash $%.2fM -> $%.2fM, talks %d" % [
 					cash0 / 1e6, float(_hud_game.get("cash", 0)) / 1e6,
+					int((_deals.get("talks", []) as Array).size())])
+			_ui.open_page("deals")
+			_on_page_opened("deals")
+			for i in range(10):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_deals.png")
+			await _close_selected()
+			while _busy:
+				await get_tree().process_frame
+			print("[plat] selftest close: cash $%.2fM, holdings %d" % [
+					float(_hud_game.get("cash", 0)) / 1e6,
 					int(_hud_game.get("holdings", 0))])
 			if _ui.is_parcel_visible():
 				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
@@ -862,6 +878,7 @@ func _load_desks() -> void:
 	_debt = _desk_file("debt")
 	_books = _desk_file("books")
 	_map_desk = _desk_file("map")
+	_deals = _desk_file("deals")
 	_ui.set_map_hud(_map_desk)
 
 
@@ -880,6 +897,9 @@ func _holding_row(bbl: String) -> Dictionary:
 
 func _enrich(b: Dictionary) -> Dictionary:
 	var out := b.duplicate()
+	var talk := _talk_row(str(b.get("bbl", "")))
+	if not talk.is_empty():
+		out["talk"] = talk
 	var row := _holding_row(str(b.get("bbl", "")))
 	if row.is_empty():
 		return out
@@ -911,10 +931,21 @@ func _enrich(b: Dictionary) -> Dictionary:
 	return out
 
 
+func _talk_row(bbl: String) -> Dictionary:
+	if bbl == "":
+		return {}
+	for t in _deals.get("talks", []):
+		if t is Dictionary and str(t.get("bbl", "")) == bbl:
+			return t
+	return {}
+
+
 func _on_page_opened(page: String) -> void:
 	match page:
 		"market":
 			_ui.set_market_rows(_market_rows)
+		"deals":
+			_ui.set_deals(_deals)
 		"portfolio":
 			_ui.set_portfolio(_portfolio)
 		"news":
@@ -1004,6 +1035,32 @@ func _refresh_resume() -> void:
 
 ## BUY the selected parcel at ask (docs/GAME-PLAN.md 3.2). The engine
 ## decides; its error string is shown verbatim — plat never re-prices.
+func _offer_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if not _selected.get("listed", false) or _selected.get("held", false):
+		return
+	await _run_verb("offer", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _walk_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("walk", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _accept_counter() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("accept-counter", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _close_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("close", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
 func _buy_selected() -> void:
 	if _busy or _campaign_dir == "" or _selected.is_empty():
 		return

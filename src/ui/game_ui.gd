@@ -7,6 +7,10 @@ signal advance_pressed
 signal year_pressed
 signal skip_pressed
 signal buy_pressed
+signal offer_pressed
+signal walk_pressed
+signal accept_counter_pressed
+signal close_deal_pressed
 signal list_pressed
 signal delist_pressed
 signal accept_offer_pressed
@@ -45,6 +49,10 @@ var _grid: GridContainer
 var _deal_head: Label
 var _deal_note: Label
 var _buy_btn: Button
+var _offer_btn: Button
+var _walk_btn: Button
+var _accept_counter_btn: Button
+var _close_btn: Button
 var _list_btn: Button
 var _delist_btn: Button
 var _accept_btn: Button
@@ -70,6 +78,7 @@ var _campaign := false
 var _page_name := ""
 var _lenses: Dictionary = {}
 var _market_rows: Array = []
+var _deals: Dictionary = {}
 var _market_cls := "all"
 var _prop_tab := "overview"
 var _prop_building: Dictionary = {}
@@ -251,6 +260,17 @@ func _style_btn(b: Button, on: bool, teal: bool) -> void:
 	b.add_theme_font_size_override("font_size", 12)
 
 
+func _ink_buy(text: String) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.add_theme_stylebox_override("normal", BwTheme.buy_btn())
+	b.add_theme_stylebox_override("hover", BwTheme.buy_btn())
+	b.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
+	b.add_theme_color_override("font_color", Color("#f6efdc"))
+	b.add_theme_font_override("font", BwTheme.sans())
+	return b
+
+
 func _build_inbox() -> void:
 	_inbox = Panel.new()
 	_inbox.set_anchors_preset(PRESET_TOP_LEFT)
@@ -358,13 +378,23 @@ func _build_parcel() -> void:
 	_deal_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	BwTheme.style_label(_deal_note, 12, false, true)
 	body.add_child(_deal_note)
-	_buy_btn = Button.new()
-	_buy_btn.text = "Buy at ask"
-	_buy_btn.add_theme_stylebox_override("normal", BwTheme.buy_btn())
-	_buy_btn.add_theme_stylebox_override("hover", BwTheme.buy_btn())
-	_buy_btn.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
-	_buy_btn.add_theme_color_override("font_color", Color("#f6efdc"))
-	_buy_btn.add_theme_font_override("font", BwTheme.sans())
+	_offer_btn = _ink_buy("Offer at ask")
+	_offer_btn.visible = false
+	_offer_btn.pressed.connect(func() -> void: offer_pressed.emit())
+	body.add_child(_offer_btn)
+	_close_btn = _ink_buy("Close")
+	_close_btn.visible = false
+	_close_btn.pressed.connect(func() -> void: close_deal_pressed.emit())
+	body.add_child(_close_btn)
+	_accept_counter_btn = _ink_buy("Accept their number")
+	_accept_counter_btn.visible = false
+	_accept_counter_btn.pressed.connect(func() -> void: accept_counter_pressed.emit())
+	body.add_child(_accept_counter_btn)
+	_walk_btn = _lens("Walk away", false)
+	_walk_btn.visible = false
+	_walk_btn.pressed.connect(func() -> void: walk_pressed.emit())
+	body.add_child(_walk_btn)
+	_buy_btn = _ink_buy("Buy at ask")
 	_buy_btn.pressed.connect(func() -> void: buy_pressed.emit())
 	body.add_child(_buy_btn)
 	_list_btn = _lens("List at appraisal", false)
@@ -485,6 +515,9 @@ func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
 	_set_stat("occ", "%.0f%%" % (float(occ) * 100.0) if occ != null else "—")
 	_set_stat("book", str(hud.get("book", "—")), bool(hud.get("bookBad", false)))
 	_set_stat("listings", str(int(hud.get("listings", 0))))
+	var deals_n := int(hud.get("deals", 0))
+	if _job_btns.has("acquire"):
+		_job_btns["acquire"].text = ("Acquire · %d" % deals_n) if deals_n > 0 else "Acquire"
 	var items: Array = hud.get("attentionItems", [])
 	if items.is_empty():
 		for s in hud.get("attention", []):
@@ -666,9 +699,14 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 		_add_chip(str(b.get("district", "")).to_upper(), BwTheme.INK_DIM, true)
 	if b.get("held", false):
 		_add_chip("OWNED", BwTheme.GOLD)
+	var talk := _talk_of(b)
+	if bool(talk.get("agreed", false)):
+		_add_chip("UNDER CONTRACT", BwTheme.GOLD)
+	elif not talk.is_empty():
+		_add_chip("ON THE TABLE", BwTheme.TEAL)
 	if b.get("listed", false) and b.get("held", false):
 		_add_chip("ON THE MARKET", BwTheme.TEAL)
-	elif b.get("listed", false):
+	elif b.get("listed", false) and talk.is_empty():
 		_add_chip("FOR SALE", BwTheme.TEAL)
 	if b.get("developing", false):
 		_add_chip("UNDER CONSTRUCTION", BwTheme.GOLD)
@@ -696,14 +734,37 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 	var offer := float(b.get("offer", -1.0))
 	var land: bool = str(b.get("cls", "")) == "land"
 	_buy_btn.visible = false
+	_offer_btn.visible = false
+	_walk_btn.visible = false
+	_accept_counter_btn.visible = false
+	_close_btn.visible = false
 	_list_btn.visible = false
 	_delist_btn.visible = false
 	_accept_btn.visible = false
 	_build_btn.visible = false
-	if listed:
+	if not talk.is_empty() and bool(talk.get("agreed", false)):
+		_deal_head.text = "Under contract"
+		var note := str(talk.get("note", ""))
+		_deal_note.text = note if note != "" and note != "<null>" else (
+				"Agreed at %s. Fund it by %s or the deposit is theirs." % [
+					_usd(float(talk.get("agreedPrice", talk.get("theirPrice", 0)))),
+					str(talk.get("closeBy", "?"))])
+		_close_btn.visible = campaign
+		_walk_btn.visible = campaign
+	elif not talk.is_empty():
+		_deal_head.text = "On the table"
+		var note2 := str(talk.get("note", ""))
+		_deal_note.text = note2 if note2 != "" and note2 != "<null>" else (
+				"They are at %s. You offered %s." % [
+					_usd(float(talk.get("theirPrice", 0))),
+					_usd(float(talk.get("yourPrice", 0)))])
+		_accept_counter_btn.visible = campaign
+		_walk_btn.visible = campaign
+	elif listed:
 		_deal_head.text = "For sale"
 		_deal_note.text = "Ask %s%s" % [_usd(float(b.get("ask", 0.0))),
 				" — motivated seller" if b.get("distress", false) else ""]
+		_offer_btn.visible = campaign
 		_buy_btn.visible = campaign
 	elif ours and offer > 0.0:
 		_deal_head.text = "Offer in hand"
@@ -754,6 +815,10 @@ func show_error(title: String, detail: String) -> void:
 	_deal_head.text = ""
 	_deal_note.text = detail
 	_buy_btn.visible = false
+	_offer_btn.visible = false
+	_walk_btn.visible = false
+	_accept_counter_btn.visible = false
+	_close_btn.visible = false
 	_list_btn.visible = false
 	_delist_btn.visible = false
 	_accept_btn.visible = false
@@ -801,6 +866,114 @@ func current_page() -> String:
 func set_market_rows(rows: Array) -> void:
 	_market_rows = rows
 	_paint_market()
+
+
+func set_deals(doc: Dictionary) -> void:
+	_deals = doc
+	_paint_deals()
+
+
+func _paint_deals() -> void:
+	_clear(_page_body)
+	_add_room_nav("deals")
+	var talks: Array = _deals.get("talks", [])
+	var inbound: Array = _deals.get("inbound", [])
+	var lois: Array = _deals.get("lois", [])
+	var counts: Dictionary = _deals.get("counts", {})
+	var max_n := int(_deals.get("maxTalks", 4))
+	_stat_strip([
+		["On the table", "%d of %d" % [int(counts.get("talks", talks.size())), max_n]],
+		["Under contract", str(int(counts.get("agreed", 0)))],
+		["Letters", str(int(counts.get("lois", lois.size())))],
+	])
+	if talks.is_empty() and inbound.is_empty():
+		_note("Nothing on the table. Open a listing and offer at ask — you can run %d at once." % max_n)
+		var go := _lens("Marketplace →", false)
+		go.pressed.connect(func() -> void: open_page("market"))
+		_page_body.add_child(go)
+	else:
+		var committed := float(_deals.get("committed", 0))
+		if committed > 0.0:
+			_note("%s of price agreed and not yet funded." % _usd(committed))
+		for t in talks:
+			_paint_talk_card(t)
+		for off in inbound:
+			_paint_inbound_card(off)
+	if not lois.is_empty():
+		var head := Label.new()
+		head.text = "LETTERS OF INTENT"
+		BwTheme.style_label(head, 10, false, true)
+		_page_body.add_child(head)
+		_note("Letters wait for the leasing cut. The engine already has them; plat does not invent a rent.")
+		for l in lois:
+			_note("%s · %s · %s sf · answer by %s" % [
+					str(l.get("name", "?")),
+					str(l.get("address", l.get("bbl", "?"))),
+					_fmt_sf(float(l.get("sf", 0))),
+					str(l.get("expires", "?"))])
+
+
+func _paint_talk_card(t: Dictionary) -> void:
+	var agreed := bool(t.get("agreed", false))
+	var bbl := str(t.get("bbl", ""))
+	var title := Label.new()
+	title.text = str(t.get("address", bbl))
+	title.add_theme_font_override("font", BwTheme.serif())
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", BwTheme.INK)
+	_page_body.add_child(title)
+	var note := str(t.get("note", ""))
+	if note == "" or note == "<null>":
+		if agreed:
+			note = "Agreed at %s with %s. %s down. Fund by %s." % [
+					_usd(float(t.get("agreedPrice", t.get("theirPrice", 0)))),
+					str(t.get("seller", "the seller")),
+					_usd(float(t.get("deposit", 0))),
+					str(t.get("closeBy", "?"))]
+		else:
+			note = "%s is at %s. You offered %s." % [
+					str(t.get("seller", "The seller")),
+					_usd(float(t.get("theirPrice", 0))),
+					_usd(float(t.get("yourPrice", 0)))]
+	_note(note)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_page_body.add_child(row)
+	if agreed:
+		var close := _ink_buy("Close")
+		close.pressed.connect(func() -> void:
+			listing_chosen.emit(bbl)
+			close_deal_pressed.emit())
+		row.add_child(close)
+	else:
+		var acc := _ink_buy("Accept their number")
+		acc.pressed.connect(func() -> void:
+			listing_chosen.emit(bbl)
+			accept_counter_pressed.emit())
+		row.add_child(acc)
+	var walk := _lens("Walk away", false)
+	walk.pressed.connect(func() -> void:
+		listing_chosen.emit(bbl)
+		walk_pressed.emit())
+	row.add_child(walk)
+	var map := _lens("Show on the map", false)
+	map.pressed.connect(func() -> void:
+		listing_chosen.emit(bbl)
+		hide_page())
+	row.add_child(map)
+
+
+func _paint_inbound_card(off: Dictionary) -> void:
+	var bbl := str(off.get("bbl", ""))
+	_note("Offer in hand on %s: they will pay %s (your ask %s)." % [
+			str(off.get("address", bbl)),
+			_usd(float(off.get("price", 0))),
+			_usd(float(off.get("ask", 0)))])
+	var acc := _ink_buy("Accept offer")
+	acc.pressed.connect(func() -> void:
+		listing_chosen.emit(bbl)
+		accept_offer_pressed.emit())
+	_page_body.add_child(acc)
 
 
 func _paint_market() -> void:
@@ -1143,14 +1316,40 @@ func _paint_prop_overview(b: Dictionary) -> void:
 
 func _paint_prop_deal(b: Dictionary, held: bool, listed: bool) -> void:
 	var offer := float(b.get("offer", -1.0))
-	if listed and not held and float(b.get("ask", 0)) > 0.0:
+	var talk := _talk_of(b)
+	if not talk.is_empty() and bool(talk.get("agreed", false)):
+		_kv("Agreed", _usd(float(talk.get("agreedPrice", talk.get("theirPrice", 0)))))
+		_kv("Deposit", _usd(float(talk.get("deposit", 0))))
+		_kv("Close by", str(talk.get("closeBy", "?")))
+		_note(str(talk.get("note", "The price is agreed. What is left is funding it.")))
+		var close := _ink_buy("Close")
+		close.pressed.connect(func() -> void:
+			hide_page()
+			close_deal_pressed.emit())
+		_page_body.add_child(close)
+		var walk := _lens("Walk away", false)
+		walk.pressed.connect(func() -> void: walk_pressed.emit())
+		_page_body.add_child(walk)
+	elif not talk.is_empty():
+		_kv("Your offer", _usd(float(talk.get("yourPrice", 0))))
+		_kv("Their number", _usd(float(talk.get("theirPrice", 0))))
+		_note(str(talk.get("note", "They countered. Take their number or walk.")))
+		var acc := _ink_buy("Accept their number")
+		acc.pressed.connect(func() -> void:
+			hide_page()
+			accept_counter_pressed.emit())
+		_page_body.add_child(acc)
+		var walk := _lens("Walk away", false)
+		walk.pressed.connect(func() -> void: walk_pressed.emit())
+		_page_body.add_child(walk)
+	elif listed and not held and float(b.get("ask", 0)) > 0.0:
 		_kv("Ask", _usd(float(b["ask"])))
-		var buy := Button.new()
-		buy.text = "Buy at ask"
-		buy.add_theme_stylebox_override("normal", BwTheme.buy_btn())
-		buy.add_theme_stylebox_override("hover", BwTheme.buy_btn())
-		buy.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
-		buy.add_theme_color_override("font_color", Color("#f6efdc"))
+		var offer_b := _ink_buy("Offer at ask")
+		offer_b.pressed.connect(func() -> void:
+			hide_page()
+			offer_pressed.emit())
+		_page_body.add_child(offer_b)
+		var buy := _ink_buy("Buy at ask")
 		buy.pressed.connect(func() -> void:
 			hide_page()
 			buy_pressed.emit())
@@ -1284,7 +1483,7 @@ func _page_meta(page: String) -> PackedStringArray:
 		"market": return PackedStringArray(["Acquire", "The Marketplace",
 				"On-market listings. Click a row to put it on the card."])
 		"deals": return PackedStringArray(["Acquire", "The Deals Desk",
-				"Live negotiations — export not wired yet."])
+				"Contracts first. An offer at ask is a handshake; Close funds it."])
 		"notes": return PackedStringArray(["Acquire", "The Note Desk",
 				"Distressed paper — export not wired yet."])
 		"portfolio": return PackedStringArray(["Assets", "Portfolio",
@@ -1547,6 +1746,11 @@ static func _class_title(cls: String) -> String:
 		"mix": return "Mixed use"
 		"land": return "Vacant lot"
 		_: return cls.capitalize()
+
+
+static func _talk_of(b: Dictionary) -> Dictionary:
+	var t: Variant = b.get("talk", {})
+	return t if t is Dictionary else {}
 
 
 static func _usd(v: float) -> String:
