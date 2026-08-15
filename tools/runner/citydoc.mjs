@@ -218,6 +218,83 @@ function holdingsOf(g) {
   return Object.values(g.holdings ?? {}).filter((h) => h && h.bbl && !g.merged?.[h.bbl]);
 }
 
+/**
+ * One deed's file extras. History is propertyTimeline + describePropertyEvent
+ * (engine prose). Money is Holding.hist, decoded the way the engine stored it:
+ * [month, occ×1000, rent psf ×100, NOI/yr]. No invented offer bounds.
+ */
+function deedOf(E, city, g, bbl) {
+  const rec = E.resolveRec?.(city.parcels, g, bbl);
+  const h = g.holdings?.[bbl];
+  let timeline = [];
+  try { timeline = E.propertyTimeline(g, bbl) ?? []; } catch { /* */ }
+  const history = timeline.map((e) => {
+    const row = { when: monthLabel(e.m), title: e.kind ?? "event", detail: "", kind: e.kind ?? "" };
+    try {
+      const d = E.describePropertyEvent(e);
+      if (d) {
+        if (d.when) row.when = d.when;
+        if (d.title) row.title = d.title;
+        if (d.detail) row.detail = d.detail;
+      }
+    } catch { /* */ }
+    return row;
+  });
+  let money = null;
+  if (h) {
+    const stamps = (h.hist ?? []).map((r) => ({
+      m: r[0],
+      when: monthLabel(r[0]),
+      occ: (r[1] ?? 0) / 1000,
+      rentPsf: (r[2] ?? 0) / 100,
+      noi: Math.round(r[3] ?? 0),
+    }));
+    const n = stamps.length;
+    let delta = null;
+    if (n >= 2) {
+      const a = stamps[0];
+      const b = stamps[n - 1];
+      const yrs = Math.max(0.25, (b.m - a.m) / 12);
+      delta = {
+        occPp: +((b.occ - a.occ) * 100).toFixed(1),
+        rentPct: a.rentPsf > 0 ? +((b.rentPsf / a.rentPsf - 1) * 100).toFixed(1) : null,
+        yrs: +yrs.toFixed(2),
+      };
+    }
+    money = {
+      heldSince: monthLabel(h.boughtM),
+      stamps,
+      latest: n ? stamps[n - 1] : null,
+      delta,
+    };
+  }
+  if (!history.length && !money) return null;
+  return {
+    bbl,
+    address: rec?.address ?? bbl,
+    history,
+    money,
+  };
+}
+
+function deedsDesk(E, city, g) {
+  const seen = new Set();
+  const add = (bbl) => { if (bbl) seen.add(String(bbl)); };
+  for (const h of holdingsOf(g)) add(h.bbl);
+  for (const li of (g.listings ?? [])) add(li.bbl);
+  for (const bbl of Object.keys(g.talks ?? {})) add(bbl);
+  for (const bbl of Object.keys(g.propertyLog ?? {})) add(bbl);
+  for (const bbl of Object.keys(g.approaches ?? {})) add(bbl);
+  for (const bbl of Object.keys(g.developments ?? {})) add(bbl);
+  for (const c of (g.comps ?? [])) add(c.bbl);
+  const files = {};
+  for (const bbl of seen) {
+    const d = deedOf(E, city, g, bbl);
+    if (d) files[bbl] = d;
+  }
+  return { files };
+}
+
 /** Desk view-models. Engine numbers only — plat paints, it does not price. */
 export function writeDesks(E, city, g, dir) {
   mkdirSync(join(dir, "desks"), { recursive: true });
@@ -232,6 +309,7 @@ export function writeDesks(E, city, g, dir) {
   writeFileSync(join(dir, "desks", "map.json"), JSON.stringify(mapDesk(E, city, g, attn)));
   writeFileSync(join(dir, "desks", "deals.json"), JSON.stringify(dealsDesk(E, city, g)));
   writeFileSync(join(dir, "desks", "leasing.json"), JSON.stringify(leasingDesk(E, city, g)));
+  writeFileSync(join(dir, "desks", "deeds.json"), JSON.stringify(deedsDesk(E, city, g)));
 }
 
 /** Letters the principal still owns. Staff / agent coverage is the engine's. */

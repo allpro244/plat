@@ -92,6 +92,7 @@ var _refi_quotes: Array = []
 var _map_desk: Dictionary = {}
 var _deals: Dictionary = {}
 var _leasing: Dictionary = {}
+var _deeds: Dictionary = {}
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -439,6 +440,18 @@ func _run_selftest() -> void:
 					for i in range(10):
 						await get_tree().process_frame
 					await _save_frame("renders/ui_leased.png")
+					_ui.open_page("property", "history")
+					_on_page_opened("property")
+					print("[plat] selftest deed history: ", _ui.property_debug_text())
+					for i in range(10):
+						await get_tree().process_frame
+					await _save_frame("renders/ui_history.png")
+					_ui.open_page("property", "money")
+					_on_page_opened("property")
+					print("[plat] selftest deed money: ", _ui.property_debug_text())
+					for i in range(10):
+						await get_tree().process_frame
+					await _save_frame("renders/ui_money.png")
 				else:
 					printerr("[plat] selftest letter FAILED: no LOI after advance")
 			else:
@@ -946,6 +959,7 @@ func _load_desks() -> void:
 	_map_desk = _desk_file("map")
 	_deals = _desk_file("deals")
 	_leasing = _desk_file("leasing")
+	_deeds = _desk_file("deeds")
 	_ui.set_map_hud(_map_desk)
 	_ui.set_leasing(_leasing)
 
@@ -963,11 +977,27 @@ func _holding_row(bbl: String) -> Dictionary:
 	return {}
 
 
+func _deed_of(bbl: String) -> Dictionary:
+	if bbl == "":
+		return {}
+	var files: Variant = _deeds.get("files", {})
+	if files is Dictionary and (files as Dictionary).has(bbl):
+		var row: Variant = (files as Dictionary)[bbl]
+		return row if row is Dictionary else {}
+	return {}
+
+
 func _enrich(b: Dictionary) -> Dictionary:
 	var out := b.duplicate()
 	var talk := _talk_row(str(b.get("bbl", "")))
 	if not talk.is_empty():
 		out["talk"] = talk
+	var deed := _deed_of(str(b.get("bbl", "")))
+	if not deed.is_empty():
+		if deed.get("history") != null:
+			out["history"] = deed["history"]
+		if deed.get("money") != null:
+			out["money"] = deed["money"]
 	var row := _holding_row(str(b.get("bbl", "")))
 	if row.is_empty():
 		return out

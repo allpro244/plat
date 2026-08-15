@@ -1572,6 +1572,14 @@ func _paint_property() -> void:
 		tabs.append(["build", "Build"])
 	if held and not land:
 		tabs.append(["roll", "Rent roll"])
+	var history: Array = b.get("history", [])
+	if history.size() > 0:
+		tabs.append(["history", "Deed history"])
+	var money: Variant = b.get("money")
+	if held and money is Dictionary:
+		var stamps: Array = (money as Dictionary).get("stamps", [])
+		if not land or float(b.get("debt", 0)) > 0.0 or stamps.size() > 0:
+			tabs.append(["money", "Money"])
 	if held:
 		tabs.append(["refi", "Refinance"])
 	var ids: Array = []
@@ -1604,6 +1612,10 @@ func _paint_property() -> void:
 			_paint_prop_build(b, developing)
 		"roll":
 			_paint_prop_roll(b)
+		"history":
+			_paint_prop_history(b)
+		"money":
+			_paint_prop_money(b)
 		"refi":
 			_paint_prop_refi()
 		_:
@@ -1734,6 +1746,85 @@ func _paint_prop_roll(b: Dictionary) -> void:
 		_paint_letter_card(l)
 
 
+func _paint_prop_history(b: Dictionary) -> void:
+	var history: Array = b.get("history", [])
+	if history.is_empty():
+		_note("Nothing on this deed yet. Trades and major leases stay with the property.")
+		return
+	_note("What has happened on this deed. Trades, major leases, construction, planning and enforcement stay with the property, whoever owns it next.")
+	_sheet_head([["Event", 0, false], ["When", 100, true]])
+	for e in history:
+		if not e is Dictionary:
+			continue
+		var title := str(e.get("title", e.get("kind", "event")))
+		var detail := str(e.get("detail", "")).strip_edges()
+		var line := title if detail == "" or detail == "<null>" else "%s · %s" % [title, detail]
+		_sheet_row([
+			[line, 0, false],
+			[str(e.get("when", "")), 100, true],
+		])
+
+
+func _paint_prop_money(b: Dictionary) -> void:
+	var money: Variant = b.get("money")
+	if not money is Dictionary:
+		_note("No hold-period record on this deed.")
+		return
+	var m: Dictionary = money
+	_kv("Held since", str(m.get("heldSince", "?")))
+	var latest: Variant = m.get("latest")
+	if latest is Dictionary:
+		var occ = latest.get("occ")
+		var rent = latest.get("rentPsf")
+		_stat_strip([
+			["Occupancy", "—" if occ == null else "%.0f%%" % (float(occ) * 100.0)],
+			["In-place rent", "—" if rent == null else "$%.2f/sf" % float(rent)],
+			["NOI / yr", _usd(float(latest.get("noi", 0)))],
+		])
+	var delta: Variant = m.get("delta")
+	if delta is Dictionary:
+		var occ_pp = delta.get("occPp")
+		var rent_pct = delta.get("rentPct")
+		var yrs = delta.get("yrs")
+		if occ_pp != null:
+			_kv("Occupancy change", "%+.1f pp over %s years" % [
+					float(occ_pp), "—" if yrs == null else "%.1f" % float(yrs)])
+		if rent_pct != null:
+			_kv("In-place rent", "%+.1f%% since the first stamp" % float(rent_pct))
+	var stamps: Array = m.get("stamps", [])
+	if stamps.is_empty():
+		_note("The record is stamped every quarter from the same operating statement the appraisal runs. There is not enough of it yet to draw.")
+		return
+	if stamps.size() < 2:
+		_note("One quarterly stamp so far. A trend needs two.")
+	_sheet_head([
+		["When", 100, false], ["Occ", 56, true], ["$/sf", 64, true],
+		["NOI / yr", 88, true],
+	])
+	for s in stamps:
+		if not s is Dictionary:
+			continue
+		var occ = s.get("occ")
+		var rent = s.get("rentPsf")
+		_sheet_row([
+			[str(s.get("when", "?")), 100, false],
+			["—" if occ == null else "%.0f%%" % (float(occ) * 100.0), 56, true],
+			["—" if rent == null else "$%.2f" % float(rent), 64, true],
+			[_usd(float(s.get("noi", 0))), 88, true],
+		])
+
+
+func property_debug_text() -> String:
+	var hist: Array = _prop_building.get("history", [])
+	var money: Variant = _prop_building.get("money")
+	var stamps := 0
+	if money is Dictionary:
+		stamps = ((money as Dictionary).get("stamps", []) as Array).size()
+	return "tab=%s hist=%d stamps=%d %s" % [
+			_prop_tab, hist.size(), stamps,
+			str(_prop_building.get("address", _prop_building.get("bbl", "?")))]
+
+
 func _leasing_building(bbl: String) -> Dictionary:
 	if bbl == "":
 		return {}
@@ -1847,7 +1938,7 @@ func _page_meta(page: String) -> PackedStringArray:
 		"leasing": return PackedStringArray(["Assets", "Leasing",
 				"The roll and the letters. Accept or pass — the rent is the engine's."])
 		"property": return PackedStringArray(["Assets", "Property",
-				"The complete file. Tabs for the desks this deed has."])
+				"The complete file. Overview, the deal, the roll, Money, Deed history."])
 		"debt": return PackedStringArray(["Capital", "Debt",
 				"The line and every loan the engine has written."])
 		"books": return PackedStringArray(["Capital", "The Books",

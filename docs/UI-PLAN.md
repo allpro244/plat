@@ -470,11 +470,21 @@ room and the property Rent roll tab paint them. Accept / Pass
 also sit on Deals, where the inbox already routes a letter.
 Signing cost is `loiSigningCost`. Counter waits.
 
-U11 (this cut): interruptions. A letter or an offer on one of
+U11 (shipped): interruptions. A letter or an offer on one of
 yours takes the screen. Advance / Year / Skip will not walk
 past it — the bar says Decide until you Accept, Pass, or
 Decide later. The card paints the exported letter, not a
 paragraph we wrote. Decide later leaves it on Deals.
+
+U12 (this cut): the property file grows two tabs the engine
+already knows how to fill. **Deed history** is
+`propertyTimeline` + `describePropertyEvent` — trades, major
+leases, construction, planning, enforcement. **Money** is
+`Holding.hist`, decoded the way the engine stored it
+(`[month, occ×1000, rent psf ×100, NOI/yr]`). A named offer
+slider stays out: B&W's `defaultOffer` / `counterPriceBounds`
+live in the web UI, not the engine, and plat will not invent
+them.
 
 U5 leftover + U9 inbox / map HUD (this cut): the city tells you
 what to do, and a room owns the screen.
@@ -511,4 +521,6 @@ what to do, and a room owns the screen.
 - `renders/ui_leasing.png` — renewal letter on the roll
 - `renders/ui_leased.png` — after Accept
 - `renders/ui_decision.png` — the letter takes the screen
+- `renders/ui_history.png` — deed history on 76 Ropewalk after the buy
+- `renders/ui_money.png` — quarterly stamps on the same hold
 - `renders/playable_selftest.png` — the click path that produced them
