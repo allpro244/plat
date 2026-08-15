@@ -335,6 +335,18 @@ func _run_selftest() -> void:
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_news.png")
+			_ui.open_page("debt")
+			_on_page_opened("debt")
+			print("[plat] selftest debt: line %s" % str(_debt.get("loc", {})))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_debt.png")
+			_ui.open_page("books")
+			_on_page_opened("books")
+			print("[plat] selftest books: cash %s" % str(_books.get("cash", 0)))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_books.png")
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:

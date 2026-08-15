@@ -702,7 +702,7 @@ func set_economy(doc: Dictionary) -> void:
 			var c: Dictionary = classes[k]
 			var line := "%s    %s    %s    %s" % [
 					k, _pct(c.get("vac"), 1, true),
-					_num(c.get("rent"), 2), _pct(c.get("cap"), 2, true)]
+					_num(c.get("rent"), 2), _pct(c.get("cap"), 2)]
 			var lab := Label.new()
 			lab.text = line
 			BwTheme.style_label(lab, 13, true)
