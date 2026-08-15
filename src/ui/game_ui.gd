@@ -890,7 +890,7 @@ func set_property_overview(b: Dictionary, options: Array = []) -> void:
 			var list := _lens("List quietly at %s" % _usd(ask), false)
 			list.pressed.connect(func() -> void: list_pressed.emit())
 			_page_body.add_child(list)
-	if held and land and not bool(b.get("developing", false)):
+	if held and land and not listed and not bool(b.get("developing", false)):
 		var head := Label.new()
 		head.text = "BUILD"
 		BwTheme.style_label(head, 10, false, true)
