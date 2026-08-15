@@ -962,8 +962,8 @@ func _paint_property() -> void:
 	row.add_theme_constant_override("separation", 6)
 	_page_body.add_child(row)
 	for t in tabs:
-		var id: String = t[0]
-		var btn := _lens(t[1], id == _prop_tab)
+		var id: String = str(t[0])
+		var btn := _lens(str(t[1]), id == _prop_tab)
 		btn.pressed.connect(func() -> void:
 			_prop_tab = id
 			_paint_property())
@@ -1176,8 +1176,8 @@ func _add_room_nav(page: String) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	for s in siblings:
-		var id: String = s[0]
-		var b := _lens(s[1], id == page)
+		var id: String = str(s[0])
+		var b := _lens(str(s[1]), id == page)
 		b.pressed.connect(func() -> void: open_page(id))
 		row.add_child(b)
 	_page_body.add_child(row)
