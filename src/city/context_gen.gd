@@ -82,6 +82,12 @@ static func build(seed_value: int, matlib: Dictionary, plan: CityPlan,
 ## vs curtain wall, the district picks the palette, the footprint is the
 ## engine's ring verbatim. The seeded parts that REMAIN seeded (bay jitter,
 ## repaints, roof furniture) are form — the renderer's half of the line.
+## Map overlay for the game view (docs/GAME-PLAN.md phase 4): "" is the
+## true city; "owners" recolors the player's deeds gold and the for-sale
+## tape green so the game state reads at any band. Set by the viewer,
+## consumed at build time — an overlay toggle is a rebuild.
+static var overlay := ""
+
 static func build_imported(ci: CityImport, matlib: Dictionary,
 		night_factor: float) -> Node3D:
 	night = night_factor
@@ -171,12 +177,19 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 		var era_name := "victorian" if year < 1916 else \
 				("prewar" if year < 1950 else "midcentury")
 		var tint: Color = p["tints"][rng.randi_range(0, (p["tints"] as Array).size() - 1)]
+		if overlay == "owners":
+			if b.get("held", false):
+				tint = Color(0.95, 0.72, 0.18)      # your deeds: gold
+			elif b.get("listed", false):
+				tint = Color(0.30, 0.78, 0.38)      # the for-sale tape: green
+			else:
+				tint = Color(0.40, 0.40, 0.42)      # everything else recedes
 		tint.a = clampf(float(b["z1"]) / 400.0, 0.02, 1.0)
 		_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
 		# Curtain wall: a tall office building of the glass era. Class and
 		# year are the engine's; the glazing is ours.
 		var glassy := (cls == "office" or cls == "mix") and year >= 1958 \
-				and float(b["z1"]) > 40.0
+				and float(b["z1"]) > 40.0 and overlay == ""
 		# Roof tone from the engine's tone index, weighted dark — a city of
 		# white lids was the single loudest thing in the first street-level
 		# frame. Crown volumes (the engine's pitched/parapet roof caps,
@@ -250,6 +263,11 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			# constant — a vacant building goes dark because it is vacant.
 			if lit_occ >= 0.0:
 				em.set_shader_parameter("lit_fraction", lit_occ * night)
+			if overlay != "":
+				# An overlay is a MAP: flat color reads, brick texture
+				# muting the gold does not (seen in the first overlay
+				# frame — the held parcel came out faint amber).
+				em.set_shader_parameter("use_wall_texture", 0.0)
 			mats.append(em)
 	mi.mesh = mesh
 	for i in range(mats.size()):

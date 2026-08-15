@@ -95,6 +95,8 @@ func _parse_args() -> Dictionary:
 				p["skip_ground"] = val == "off"
 			"city":
 				p["city"] = val
+			"overlay":
+				ContextGen.overlay = val
 			"tx":
 				p["target_x"] = float(val)
 			"tz":

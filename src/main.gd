@@ -44,6 +44,8 @@ var time_of_day := 15.5
 var _hud: Label
 var _card: Label
 var _press_pos := Vector2.ZERO   # to tell a click from a drag
+var _selected: Dictionary = {}   # the building on the card
+var _listing_pick := -1          # TAB cycles the for-sale tape
 var _help_visible := true
 var _busy := false
 var _panning := false
@@ -195,6 +197,17 @@ func _run_selftest() -> void:
 			await get_tree().process_frame
 		print("[plat] selftest campaign advance: %s -> %s" % [
 				before, str(_hud_game.get("date", "?"))])
+		# And a DEAL: walk the tape, buy the first listing, prove the money
+		# moved and the deed came back marked.
+		var cash0 := float(_hud_game.get("cash", 0))
+		_cycle_listing()
+		if not _selected.is_empty():
+			await _buy_selected()
+			while _busy:
+				await get_tree().process_frame
+			print("[plat] selftest buy: cash $%.2fM -> $%.2fM, holdings %d" % [
+					cash0 / 1e6, float(_hud_game.get("cash", 0)) / 1e6,
+					int(_hud_game.get("holdings", 0))])
 	for i in range(20):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
@@ -309,6 +322,8 @@ func _advance_campaign(months: int) -> void:
 	var meta: Variant = JSON.parse_string(
 			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
 	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
+	if runner == "" or not FileAccess.file_exists(runner):
+		runner = _resolve_runner()
 	var out := []
 	var code := OS.execute("node", [runner, "advance", "--dir=" + _campaign_dir,
 			"--months=%d" % months], out, true)
@@ -365,6 +380,7 @@ func _pick_building(screen: Vector2) -> void:
 	_show_card(best)
 
 func _show_card(b: Dictionary) -> void:
+	_selected = b
 	var par: Dictionary = b
 	var occ_line := "—"
 	if float(par.get("occ", -1.0)) >= 0.0:
@@ -377,6 +393,16 @@ func _show_card(b: Dictionary) -> void:
 		"%d floors · built %d" % [int(par.get("floors", 0)), int(par.get("year", 0))],
 		occ_line,
 	]
+	# The money lines: the record becomes an investment memo.
+	if float(par.get("value", -1.0)) > 0.0:
+		lines.append("appraised $%.2fM" % (float(par["value"]) / 1e6))
+	if par.get("listed", false):
+		lines.append("FOR SALE — ask $%.2fM%s" % [float(par.get("ask", 0.0)) / 1e6,
+				"  (DISTRESS)" if par.get("distress", false) else ""])
+		if _campaign_dir != "" and not par.get("held", false):
+			lines.append("[B] buy at ask")
+	elif float(par.get("ask", -1.0)) > 0.0:
+		lines.append("off-market ask $%.2fM" % (float(par["ask"]) / 1e6))
 	_card.text = "\n".join(lines)
 	_card.visible = true
 
@@ -387,6 +413,95 @@ static func _fmt_sf(v: float) -> String:
 		out = "," + s.right(3) + out
 		s = s.left(s.length() - 3)
 	return s + out
+
+## Where the simulation lives: the plat-sim sidecar next to the executable,
+## a PLAT_SIM env override, or the dev repo. Empty string = no sim available.
+func _resolve_runner() -> String:
+	var beside := OS.get_executable_path().get_base_dir() + "/plat-sim.mjs"
+	if FileAccess.file_exists(beside):
+		return beside
+	var env := OS.get_environment("PLAT_SIM")
+	if env != "" and FileAccess.file_exists(env):
+		return env
+	var dev := "/workspace/plat-econ/tools/game-server.mjs"
+	return dev if FileAccess.file_exists(dev) else ""
+
+## BREAK GROUND (docs/GAME-PLAN.md phase 2, first cut): F1 founds a firm on
+## a fresh island and opens it as the live campaign.
+func _break_ground() -> void:
+	if _busy:
+		return
+	var runner := _resolve_runner()
+	if runner == "":
+		_card.text = "no simulation found\n(plat-sim.mjs beside the executable,\nor set PLAT_SIM)"
+		_card.visible = true
+		return
+	_busy = true
+	_hud.text = "breaking ground (generating island, founding firm)..."
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var dir := ProjectSettings.globalize_path("user://campaigns/c%d" % (randi() % 1000000))
+	var out := []
+	var code := OS.execute("node", [runner, "new", "--dir=" + dir,
+			"--seed=%d" % (randi() % 100000)], out, true)
+	_busy = false
+	if code != 0:
+		_card.text = "break ground FAILED\n" + "".join(out).right(200)
+		_card.visible = true
+		return
+	_campaign_dir = dir
+	_city_file = dir + "/city.json"
+	_engine_pick = -1
+	_load_game_hud()
+	_g_target = Vector2.ZERO
+	_snap()
+	_rebuild()
+
+## BUY the selected parcel at ask (docs/GAME-PLAN.md 3.2). The engine
+## decides; its error string is shown verbatim — plat never re-prices.
+func _buy_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if not _selected.get("listed", false) or _selected.get("held", false):
+		return
+	var bbl := str(_selected.get("bbl", ""))
+	_busy = true
+	_hud.text = "buying %s..." % bbl
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var meta: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
+	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
+	if runner == "" or not FileAccess.file_exists(runner):
+		runner = _resolve_runner()
+	var out := []
+	var code := OS.execute("node", [runner, "buy", "--dir=" + _campaign_dir,
+			"--bbl=" + bbl], out, true)
+	_busy = false
+	if code != 0:
+		var res: Variant = JSON.parse_string(
+				FileAccess.get_file_as_string(_campaign_dir + "/result.json"))
+		_card.text = "BUY FAILED\n%s" % str((res as Dictionary).get("err", "?")) \
+				if res is Dictionary else "BUY FAILED"
+		return
+	_load_game_hud()
+	_rebuild()
+
+## TAB walks the for-sale tape: camera flies to each listing, card shows it.
+func _cycle_listing() -> void:
+	if city == null or city._import == null:
+		return
+	var listed: Array = []
+	for b in city._import.buildings:
+		if b.get("listed", false) and not b.get("deco", false):
+			listed.append(b)
+	if listed.is_empty():
+		return
+	_listing_pick = (_listing_pick + 1) % listed.size()
+	var b: Dictionary = listed[_listing_pick]
+	var c := (b["bbox"] as Rect2).get_center()
+	_g_target = c
+	_show_card(b)
 
 func _update_hud() -> void:
 	if city == null or city.rig == null:
@@ -400,7 +515,9 @@ func _update_hud() -> void:
 	var help := ""
 	if _help_visible:
 		if _campaign_dir != "":
-			help = "\n\nSPACE advance a season (the simulation decides what changed)"
+			help = "\n\nSPACE advance a season   B buy selected   TAB for-sale tape   M owners overlay"
+		if _campaign_dir == "":
+			help = "\n\nF1 BREAK GROUND — found a firm on a fresh island"
 		help += ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
 				+ "\nleft-drag pan   right-drag rotate/tilt   wheel zoom"
 				+ "\narrows pan   PgUp/PgDn height   C re-centre downtown"
@@ -413,6 +530,10 @@ func _update_hud() -> void:
 				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6,
 				int(_hud_game.get("holdings", 0)),
 				"" if _hud_game.get("occ") == null else " | occ %.0f%%" % (float(_hud_game.get("occ", 0)) * 100.0)]
+		game_line += " | %d for sale (TAB)" % int(_hud_game.get("listings", 0))
+		var att: Array = _hud_game.get("attention", [])
+		if not att.is_empty():
+			game_line += "\n! " + " · ".join(PackedStringArray(att))
 	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s%s" % [
 			_fps, city.rig.describe(), _target.x, _target.y, int(time_of_day),
 			int(fposmod(time_of_day, 1.0) * 60.0), game_line, plan_line, help]
@@ -486,6 +607,16 @@ func _unhandled_input(event: InputEvent) -> void:
 					_g_target = Vector2.ZERO
 					_snap()
 					_rebuild()
+			KEY_F1:
+				_break_ground()
+			KEY_M:
+				# Owners overlay: your deeds gold, the for-sale tape green.
+				ContextGen.overlay = "" if ContextGen.overlay == "owners" else "owners"
+				_rebuild()
+			KEY_B:
+				_buy_selected()
+			KEY_TAB:
+				_cycle_listing()
 			KEY_SPACE:
 				# The game key: a season passes, the sim decides what
 				# changed, the city rebuilds to show it.
