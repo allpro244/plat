@@ -22,6 +22,9 @@ arithmetic in a shader (floors × bays at stated sizes), not a texture.
 
 ## Playing it
 
+**New here?** See [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) — what Godot is,
+how to install it, and how to start a campaign without touching `PLAT_SIM`.
+
 On a machine with a GPU:
 
 ```sh

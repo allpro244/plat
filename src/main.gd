@@ -595,7 +595,8 @@ static func _fmt_sf(v: float) -> String:
 	return s + out
 
 ## Where the simulation lives: the plat-sim sidecar next to the executable,
-## a PLAT_SIM env override, or the dev repo. Empty string = no sim available.
+## a PLAT_SIM env override, plat-econ checked out beside this project, or
+## the Cloud Agent dev path. Empty string = no sim available.
 func _resolve_runner() -> String:
 	var beside := OS.get_executable_path().get_base_dir() + "/plat-sim.mjs"
 	if FileAccess.file_exists(beside):
@@ -603,6 +604,14 @@ func _resolve_runner() -> String:
 	var env := OS.get_environment("PLAT_SIM")
 	if env != "" and FileAccess.file_exists(env):
 		return env
+	var root := ProjectSettings.globalize_path("res://")
+	for rel in [
+			"../plat-econ/tools/game-server.mjs",
+			"plat-econ/tools/game-server.mjs",
+	]:
+		var p := root.path_join(rel).simplify_path()
+		if FileAccess.file_exists(p):
+			return p
 	var dev := "/workspace/plat-econ/tools/game-server.mjs"
 	return dev if FileAccess.file_exists(dev) else ""
 
