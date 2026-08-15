@@ -56,8 +56,8 @@ PLAT — Broadway & Wall in 3D
 
 1. Double-click plat.exe (Windows) or plat.x86_64 (Linux).
 2. Wait ~10 seconds while the city and your firm load.
-3. Click any building to read its record and price.
-4. Space = advance time.  B = buy selected.  H = full controls.
+3. Break ground (or Continue). Click Acquire for the marketplace tape.
+4. Click a listing or a building, then Buy at ask. Advance moves a month.
 
 Left-drag pans.  Right-drag rotates.  Mouse wheel zooms.
 EOF

@@ -54,6 +54,7 @@ var _fps_frames := 0
 var _fps := 0.0
 var _selftest := false
 var _uishot := false
+var _startshot := false
 var _target := Vector2.ZERO      # orbit centre, world XZ (eased, applied)
 # Goal state: inputs write here; _process eases the applied state toward it.
 var _g_bearing := 225.0
@@ -80,10 +81,12 @@ var _engine_pick := -1
 var _city_file := ""       # a plat-city/1 export; when set, the viewer plays it
 var _campaign_dir := ""    # a game-server campaign; when set, plat IS the game view
 var _hud_game := {}        # firm/date/cash from the campaign's hud.json
+var _market_rows: Array = []
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
 	_uishot = "--uishot" in OS.get_cmdline_user_args()
+	_startshot = "--startshot" in OS.get_cmdline_user_args()
 	# The game OPENS in an engine city: parcels, records, clickable
 	# buildings. Launching into the renderer's own seeded testbed made
 	# every click a no-op — the first thing the owner tried. N still
@@ -104,33 +107,35 @@ func _ready() -> void:
 	# Acceptance: `godot -- --selftest` must exercise the deal loop, not
 	# just the viewer. Found a firm on seed 1928 when the caller did not
 	# already pass --campaign=.
-	if (_selftest or _uishot) and _campaign_dir == "":
+	if (_selftest or _uishot) and _campaign_dir == "" and not _startshot:
 		_bootstrap_selftest_campaign()
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_ui = GameUi.new()
 	layer.add_child(_ui)
-	_ui.advance_pressed.connect(func() -> void: _advance_campaign(3))
+	_ui.advance_pressed.connect(func() -> void: _advance_campaign(1, false))
+	_ui.year_pressed.connect(func() -> void: _advance_campaign(12, true))
+	_ui.skip_pressed.connect(func() -> void: _advance_campaign(36, true))
 	_ui.buy_pressed.connect(_buy_selected)
-	_ui.listings_pressed.connect(_cycle_listing)
-	_ui.break_ground_pressed.connect(_break_ground)
+	_ui.listing_chosen.connect(_focus_listing)
+	_ui.page_opened.connect(_on_page_opened)
+	_ui.break_ground_pressed.connect(_break_ground_opts)
+	_ui.continue_pressed.connect(_continue_campaign)
 	_ui.close_parcel_pressed.connect(func() -> void:
 		_selected = {}
 		_ui.hide_parcel())
-	_ui.owners_lens_pressed.connect(func(on: bool) -> void:
-		ContextGen.overlay = "owners" if on else ""
-		_rebuild())
+	_ui.lens_pressed.connect(_on_lens)
+	_ui.attention_opened.connect(_on_attention)
 	_build_nav_widget(layer)
 	_ui.set_status("generating city...")
 	await get_tree().process_frame
 	await _rebuild()
-	# Shipped zip with plat-econ beside the exe: start the game without F1.
-	if _should_auto_start_campaign():
-		await _break_ground()
-
-func _should_auto_start_campaign() -> bool:
-	return not _selftest and _campaign_dir == "" and not Engine.is_editor_hint() \
-			and _resolve_runner() != ""
+	_refresh_resume()
+	if _campaign_dir != "":
+		_ui.set_playing(true)
+		_load_desks()
+	else:
+		_ui.set_playing(false)
 
 ## MapLibre NavigationControl analogue: compass resets bearing; +/− zoom.
 func _build_nav_widget(layer: CanvasLayer) -> void:
@@ -212,6 +217,8 @@ func _rebuild() -> void:
 		await _run_selftest()
 	elif _uishot:
 		await _run_uishot()
+	elif _startshot:
+		await _run_startshot()
 
 ## Headless proof that the interactive path works: exercise the free-flow
 ## camera, the parcel card, a campaign advance and a buy, save frames, quit.
@@ -277,7 +284,7 @@ func _run_selftest() -> void:
 		# The game loop itself, once: sim advances in node, city rebuilds.
 		var before := str(_hud_game.get("date", "?"))
 		var cash_a := float(_hud_game.get("cash", 0))
-		await _advance_campaign(3)
+		await _advance_campaign(1, false)
 		while _busy:
 			await get_tree().process_frame
 		print("[plat] selftest campaign advance: %s $%.2fM -> %s $%.2fM" % [
@@ -323,18 +330,34 @@ func _run_uishot() -> void:
 	_snap()
 	for i in range(8):
 		await get_tree().process_frame
+	_ui.set_playing(true)
+	_load_desks()
 	_pick_affordable_listing()
 	if not _ui.is_parcel_visible() and city._import != null:
 		for b in city._import.buildings:
 			if b.get("listed", false) and not b.get("deco", false):
 				_show_card(b)
 				break
+	_ui.open_page("market")
+	_on_page_opened("market")
 	_update_hud()
 	for i in range(12):
 		await get_tree().process_frame
 	await _save_frame("renders/ui_current.png")
 	print("[plat] uishot OK -> ", ProjectSettings.globalize_path(
 			"res://renders/ui_current.png"))
+	get_tree().quit(0)
+
+
+func _run_startshot() -> void:
+	_startshot = false
+	_ui.set_playing(false)
+	_refresh_resume()
+	for i in range(10):
+		await get_tree().process_frame
+	await _save_frame("renders/ui_start.png")
+	print("[plat] startshot OK -> ", ProjectSettings.globalize_path(
+			"res://renders/ui_start.png"))
 	get_tree().quit(0)
 
 
@@ -532,11 +555,12 @@ func _load_game_hud() -> void:
 	var txt := FileAccess.get_file_as_string(_campaign_dir + "/hud.json")
 	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
 	_hud_game = doc if doc is Dictionary else {}
+	_load_desks()
 
 ## Advance the CAMPAIGN: the simulation runs in node (the engine repo's
 ## game-server), plat re-reads the files it wrote and rebuilds. The sim owns
 ## the quantities; this view never computes one.
-func _advance_campaign(months: int) -> void:
+func _advance_campaign(months: int, until_attention: bool = false) -> void:
 	if _busy or _campaign_dir == "":
 		return
 	_busy = true
@@ -548,9 +572,12 @@ func _advance_campaign(months: int) -> void:
 	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
 	if runner == "" or not FileAccess.file_exists(runner):
 		runner = _resolve_runner()
+	var args := PackedStringArray([runner, "advance", "--dir=" + _campaign_dir,
+			"--months=%d" % months])
+	if until_attention:
+		args.append("--until=attention")
 	var out := []
-	var ran: Array = _run_sim(PackedStringArray([runner, "advance", "--dir=" + _campaign_dir,
-			"--months=%d" % months]))
+	var ran: Array = _run_sim(args)
 	var code: int = ran[0]
 	out = ran[1]
 	_busy = false
@@ -653,9 +680,11 @@ func _resolve_runner() -> String:
 	var dev := "/workspace/plat-econ/tools/game-server.mjs"
 	return dev if FileAccess.file_exists(dev) else ""
 
-## BREAK GROUND (docs/GAME-PLAN.md phase 2, first cut): F1 founds a firm on
-## a fresh island and opens it as the live campaign.
 func _break_ground() -> void:
+	await _break_ground_opts("city", "village", 2500000)
+
+
+func _break_ground_opts(size: String, density: String, cash: int) -> void:
 	if _busy:
 		return
 	var runner := _resolve_runner()
@@ -667,22 +696,107 @@ func _break_ground() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var dir := ProjectSettings.globalize_path("user://campaigns/c%d" % (randi() % 1000000))
-	var out := []
 	var ran: Array = _run_sim(PackedStringArray([runner, "new", "--dir=" + dir,
-			"--seed=%d" % (randi() % 100000)]))
+			"--seed=%d" % (randi() % 100000),
+			"--size=" + size, "--density=" + density, "--cash=%d" % cash]))
 	var code: int = ran[0]
-	out = ran[1]
+	var out: Array = ran[1]
 	_busy = false
 	if code != 0:
 		_ui.show_error("Break ground failed", "".join(out).right(200))
 		return
+	_open_campaign(dir)
+
+
+func _continue_campaign(path: String) -> void:
+	if path == "" or not FileAccess.file_exists(path.path_join("city.json")):
+		return
+	_open_campaign(path)
+
+
+func _open_campaign(dir: String) -> void:
 	_campaign_dir = dir
 	_city_file = dir + "/city.json"
 	_engine_pick = -1
 	_load_game_hud()
+	_ui.set_playing(true)
 	_g_target = Vector2.ZERO
 	_snap()
 	_rebuild()
+
+
+func _load_desks() -> void:
+	if _campaign_dir == "" or _ui == null:
+		return
+	var txt := FileAccess.get_file_as_string(_campaign_dir + "/desks/market.json")
+	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
+	if doc is Dictionary:
+		_market_rows = (doc as Dictionary).get("rows", [])
+	else:
+		_market_rows = []
+
+
+func _on_page_opened(page: String) -> void:
+	if page == "market":
+		_ui.set_market_rows(_market_rows)
+	elif page == "property":
+		if _selected.is_empty():
+			_ui.set_page_note("Click a building on the map, then open Full view.")
+		else:
+			_ui.set_page_note("Overview is on the glance card. Rent roll, money and build tabs ship as their exports land.")
+	else:
+		_ui.set_page_note("This desk is next. The engine already has the numbers; the export is not wired yet.")
+
+
+func _on_lens(name: String, on: bool) -> void:
+	if name == "owners":
+		ContextGen.overlay = "owners" if on else ""
+	elif name == "listings":
+		ContextGen.overlay = "listings" if on else ""
+	else:
+		return
+	_rebuild()
+
+
+func _on_attention(item: Dictionary) -> void:
+	var bbl := str(item.get("bbl", ""))
+	if bbl != "":
+		_focus_listing(bbl)
+
+
+func _focus_listing(bbl: String) -> void:
+	if city == null or city._import == null or bbl == "":
+		return
+	for b in city._import.buildings:
+		if str(b.get("bbl", "")) == bbl:
+			var c := (b["bbox"] as Rect2).get_center()
+			_g_target = c
+			_show_card(b)
+			return
+
+
+func _refresh_resume() -> void:
+	if _ui == null:
+		return
+	var root := ProjectSettings.globalize_path("user://campaigns")
+	var best := ""
+	var best_label := ""
+	var d := DirAccess.open(root)
+	if d:
+		d.list_dir_begin()
+		var name := d.get_next()
+		while name != "":
+			if d.current_is_dir() and not name.begins_with("."):
+				var hud_path := root.path_join(name).path_join("hud.json")
+				if FileAccess.file_exists(hud_path):
+					var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(hud_path))
+					if doc is Dictionary:
+						best = root.path_join(name)
+						best_label = "%s · %s · %s" % [
+								str(doc.get("city", name)), str(doc.get("date", "")),
+								"$%.2fM" % (float(doc.get("cash", 0)) / 1e6)]
+			name = d.get_next()
+	_ui.set_resume(best, best_label)
 
 ## BUY the selected parcel at ask (docs/GAME-PLAN.md 3.2). The engine
 ## decides; its error string is shown verbatim — plat never re-prices.
@@ -781,6 +895,7 @@ func _update_hud() -> void:
 				+ "\nV free-fly · C downtown · H toggle help · Esc quit")
 	_ui.set_help(help, _help_visible)
 	_ui.set_owners_lens(ContextGen.overlay == "owners")
+	_ui.set_listings_lens(ContextGen.overlay == "listings")
 	if _compass:
 		var br := city.rig.bearing()
 		_compass.text = "N\n%03d°" % int(fposmod(br, 360.0))
@@ -889,7 +1004,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SPACE:
 				# The game key: a season passes, the sim decides what
 				# changed, the city rebuilds to show it.
-				_advance_campaign(3)
+				_advance_campaign(1, false)
 			KEY_ESCAPE:
 				get_tree().quit()
 

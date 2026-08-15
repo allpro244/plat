@@ -18,6 +18,7 @@ export_presets.cfg
 !/renders/camera_aerial.png
 !/renders/ui_proof.png
 !/renders/ui_current.png
+!/renders/ui_start.png
 
 # Local checkout of the economy engine (dev path main.gd expects).
 # Public repo; clone it beside plat, do not commit it here.

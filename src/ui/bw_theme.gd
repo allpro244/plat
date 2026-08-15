@@ -154,3 +154,38 @@ static func buy_btn() -> StyleBoxFlat:
 
 static func class_color(cls: String) -> Color:
 	return CLASS_COLORS.get(cls, Color("#5c5348"))
+
+
+static func page_sheet() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(0.976, 0.961, 0.922, 0.97)
+	s.border_color = CARD_LINE
+	s.set_border_width_all(1)
+	s.set_corner_radius_all(10)
+	s.shadow_color = Color(0.188, 0.149, 0.063, 0.28)
+	s.shadow_size = 28
+	s.shadow_offset = Vector2(0, 10)
+	return s
+
+
+static func start_opt(on: bool) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.set_corner_radius_all(5)
+	s.set_border_width_all(1)
+	if on:
+		s.bg_color = Color(0.93, 0.86, 0.68, 0.96)
+		s.border_color = GOLD
+	else:
+		s.bg_color = Color(1.0, 0.992, 0.965, 0.94)
+		s.border_color = Color(0.376, 0.298, 0.133, 0.22)
+	s.content_margin_left = 10
+	s.content_margin_right = 10
+	s.content_margin_top = 8
+	s.content_margin_bottom = 8
+	return s
+
+
+static func style_label(node: Label, size: int, use_mono: bool = false, dim: bool = false) -> void:
+	node.add_theme_font_override("font", BwTheme.mono() if use_mono else BwTheme.sans())
+	node.add_theme_font_size_override("font_size", size)
+	node.add_theme_color_override("font_color", INK_DIM if dim else INK)

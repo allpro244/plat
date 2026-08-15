@@ -184,6 +184,13 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 				tint = Color(0.30, 0.78, 0.38)      # the for-sale tape: green
 			else:
 				tint = Color(0.40, 0.40, 0.42)      # everything else recedes
+		elif overlay == "listings":
+			if b.get("listed", false):
+				tint = Color(0.30, 0.78, 0.38)
+			elif b.get("held", false):
+				tint = Color(0.95, 0.72, 0.18)
+			else:
+				tint = Color(0.42, 0.42, 0.44)
 		tint.a = clampf(float(b["z1"]) / 400.0, 0.02, 1.0)
 		_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
 		# Curtain wall: a tall office building of the glass era. Class and

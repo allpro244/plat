@@ -160,6 +160,7 @@ static func load_city(path: String) -> CityImport:
 			"deco": int(b.get("d", 0)) == 1,
 			"crown": int(b.get("x", 0)) == 1,
 			"district": str(par.get("district", "?")),
+			"address": str(par.get("address", "")),
 			"demand": float(par.get("demandScore", 0.0)),
 			# The economy's occupancy for this parcel (0-1), simulated by
 			# the engine when the export ran with --months. Drives dusk

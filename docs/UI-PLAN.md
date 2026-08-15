@@ -415,6 +415,27 @@ Until that session exists, we are not "close." We are on U0.
 
 ---
 
+## 10. This cut (executed)
+
+Shipped in the same PR as the first playable B&W session:
+
+- Runner: `--cash=` on `new`; `--until=attention` on `advance`; richer
+  `hud.json` (line, CF, book, year, routed attention); `desks/market.json`
+  and `desks/attention.json` on every write. Address on city parcels.
+- Start room: Continue + size / build-out / capital → Break ground.
+- Full-width bar: reserved vitals, job nav, Market / Owners lenses,
+  Advance / Year / Skip.
+- Marketplace desk room: click a row → glance card.
+- Glance card: address, chips, grid, Buy at ask, Full view.
+- Inbox: Open → routed page. Empty state offers Acquire.
+- Mouse-only for the session. Keys remain accelerators.
+
+Still not B&W-complete: Deals, Portfolio, Debt, Leasing, Staff, Notes,
+Research, Books, News, Economy rooms are titled stubs. Write verbs beyond
+buy-at-ask and develop are not on the runner yet. That is U6–U8.
+
+---
+
 ## 9. Current evidence
 
 `renders/ui_current.png` is the chrome as of this plan: a left-hand vitals
