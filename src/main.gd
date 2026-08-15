@@ -184,6 +184,18 @@ func _rebuild() -> void:
 	add_child(city)
 	_snap()
 	print("[plat] built seed %d in %d ms" % [seed_value, Time.get_ticks_msec() - t0])
+	# A rebuild replaces every imported record. Re-bind the card to the same
+	# BBL so a buy shows ★ YOURS instead of a stale FOR SALE line.
+	var keep := str(_selected.get("bbl", ""))
+	if keep != "" and city._import != null:
+		var found := false
+		for b in city._import.buildings:
+			if str(b.get("bbl", "")) == keep:
+				_show_card(b)
+				found = true
+				break
+		if not found:
+			_card.visible = false
 	_busy = false
 	if _selftest:
 		await _run_selftest()
@@ -195,7 +207,10 @@ func _run_selftest() -> void:
 	# rebuild re-entering the selftest would loop forever.
 	_selftest = false
 	# Camera proof: two framings the old band clamp would have rejected.
-	# Street — closer than the old near floor (70 m / 130 m).
+	# Street — closer than the old near floor (70 m / 130 m), aimed at the
+	# downtown core so the frame is buildings, not the origin park.
+	if city._import != null:
+		_g_target = city._import.core
 	_g_bearing = 200.0
 	_g_pitch = 72.0
 	_g_distance = 48.0
@@ -255,16 +270,21 @@ func _run_selftest() -> void:
 		print("[plat] selftest campaign advance: %s $%.2fM -> %s $%.2fM" % [
 				before, cash_a / 1e6,
 				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6])
-		# And a DEAL: buy the cheapest listed lot cash covers.
+		# And a DEAL: buy the cheapest listed lot cash covers. Owners
+		# overlay on so the bought lot's gold marker is in the frame.
 		var cash0 := float(_hud_game.get("cash", 0))
 		_pick_affordable_listing()
 		if not _selected.is_empty():
+			print("[plat] selftest listing: ", _card.text.replace("\n", " | "))
+			ContextGen.overlay = "owners"
 			await _buy_selected()
 			while _busy:
 				await get_tree().process_frame
 			print("[plat] selftest buy: cash $%.2fM -> $%.2fM, holdings %d" % [
 					cash0 / 1e6, float(_hud_game.get("cash", 0)) / 1e6,
 					int(_hud_game.get("holdings", 0))])
+			if _card.visible:
+				print("[plat] selftest owned card: ", _card.text.replace("\n", " | "))
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
