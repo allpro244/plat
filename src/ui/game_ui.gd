@@ -698,8 +698,8 @@ func _paint_market() -> void:
 	for c in ["land", "office", "retail", "multifamily", "industrial"]:
 		if not classes.has(c):
 			continue
-		var id := c
-		var b := _lens("%s · %d" % [c, int(classes[c])], _market_cls == id)
+		var id: String = str(c)
+		var b := _lens("%s · %d" % [id, int(classes[id])], _market_cls == id)
 		b.pressed.connect(func() -> void:
 			_market_cls = id
 			_paint_market())
