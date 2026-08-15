@@ -439,7 +439,11 @@ develop are still U7. Deals, Notes, Leasing, Staff, Research remain stubs.
 
 ## 9. Current evidence
 
-`renders/ui_current.png` is the chrome as of this plan: a left-hand vitals
-sticker, a compass, and the city. The parcel card and command rail that
-`game_ui.gd` builds did not even read in the frame — which is the point.
-This is the baseline, not a claim that the job is done.
+- `renders/ui_start.png` — start room
+- `renders/ui_current.png` — marketplace tape
+- `renders/ui_portfolio.png` — one deed after the selftest buy
+- `renders/ui_economy.png` — cycle + four space markets
+- `renders/ui_news.png` — the tape
+- `renders/ui_debt.png` — the line, no mortgages yet
+- `renders/ui_books.png` — cash / NW / year-2000 ledger
+- `renders/playable_selftest.png` — the click path that produced them
