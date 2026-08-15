@@ -414,6 +414,7 @@ func _run_selftest() -> void:
 						str(_hud_game.get("date", "?")),
 						int((_leasing.get("letters", []) as Array).size())])
 				_ui.hide_page()
+				_ui.refresh_vitals(_hud_game, true)
 				_ui.show_next_decision()
 				print("[plat] selftest decision: ", _ui.decision_debug_text())
 				for i in range(10):
@@ -752,6 +753,8 @@ func _load_game_hud() -> void:
 	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
 	_hud_game = doc if doc is Dictionary else {}
 	_load_desks()
+	if _ui != null:
+		_ui.refresh_vitals(_hud_game, true)
 
 ## Advance the CAMPAIGN: the simulation runs in node (the engine repo's
 ## game-server), plat re-reads the files it wrote and rebuilds. The sim owns
