@@ -81,8 +81,18 @@ var _hud_game := {}        # firm/date/cash from the campaign's hud.json
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
+	# The game OPENS in an engine city: parcels, records, clickable
+	# buildings. Launching into the renderer's own seeded testbed made
+	# every click a no-op — the first thing the owner tried. N still
+	# reaches the plat generator; --seed= forces it from the CLI.
+	_engine_pick = 0
+	_city_file = ENGINE_CITIES[0]
 	for a in OS.get_cmdline_user_args():
-		if a.begins_with("--city="):
+		if a.begins_with("--seed="):
+			_city_file = ""
+			_engine_pick = -1
+			seed_value = int(a.substr(7))
+		elif a.begins_with("--city="):
 			_city_file = a.substr(7)
 		elif a.begins_with("--campaign="):
 			_campaign_dir = a.substr(11).rstrip("/")
