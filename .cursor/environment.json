@@ -1,0 +1,7 @@
+{
+  "name": "plat",
+  "repositoryDependencies": [
+    "github.com/allpro244/CRE-GAME",
+    "github.com/allpro244/plat-econ"
+  ]
+}
