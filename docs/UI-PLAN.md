@@ -430,10 +430,14 @@ Shipped in the same PR as the first playable B&W session:
 - Inbox: Open → routed page. Empty state offers Acquire.
 - Mouse-only for the session. Keys remain accelerators.
 
-U6 (this cut): Portfolio, Property overview, News, Economy, Debt, and Books
-read `desks/*.json` written beside `hud.json`. Click a holding → property
-file. Capital and Assets have room nav. Write verbs beyond buy-at-ask and
-develop are still U7. Deals, Notes, Leasing, Staff, Research remain stubs.
+U7 (this cut): List / Delist / Accept offer / Build. Runner verbs
+`list`, `delist`, `accept-offer` sit next to the existing `develop-options`
+/ `develop`. Glance card and property file show the buttons. Ask is the
+engine appraisal (`ownedHoldingValue`); plat does not pick a price.
+A bought lot is no longer a dead end.
+
+Still stubs: Deals, Notes, Leasing, Staff, Research. LOI, refi, and the
+line draw are next.
 
 ---
 

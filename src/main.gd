@@ -87,6 +87,7 @@ var _news: Dictionary = {}
 var _economy: Dictionary = {}
 var _debt: Dictionary = {}
 var _books: Dictionary = {}
+var _dev_options: Array = []
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -122,6 +123,10 @@ func _ready() -> void:
 	_ui.year_pressed.connect(func() -> void: _advance_campaign(12, true))
 	_ui.skip_pressed.connect(func() -> void: _advance_campaign(36, true))
 	_ui.buy_pressed.connect(_buy_selected)
+	_ui.list_pressed.connect(_list_selected)
+	_ui.delist_pressed.connect(_delist_selected)
+	_ui.accept_offer_pressed.connect(_accept_offer)
+	_ui.develop_pressed.connect(_develop_selected)
 	_ui.listing_chosen.connect(_focus_listing)
 	_ui.page_opened.connect(_on_page_opened)
 	_ui.break_ground_pressed.connect(_break_ground_opts)
@@ -347,6 +352,26 @@ func _run_selftest() -> void:
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_books.png")
+			_ui.hide_page()
+			await _list_selected()
+			while _busy:
+				await get_tree().process_frame
+			print("[plat] selftest list: ", _ui.parcel_debug_text())
+			_ui.open_page("property")
+			_on_page_opened("property")
+			for i in range(10):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_listed.png")
+			if str(_selected.get("cls", "")) == "land":
+				await _delist_selected()
+				while _busy:
+					await get_tree().process_frame
+				_ui.open_page("property")
+				_on_page_opened("property")
+				print("[plat] selftest build options: %d" % _dev_options.size())
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_build.png")
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
@@ -807,6 +832,20 @@ func _enrich(b: Dictionary) -> Dictionary:
 		out["value"] = row["value"]
 	if row.get("occ") != null:
 		out["occ"] = row["occ"]
+	if row.get("listAsk") != null:
+		out["listAsk"] = row["listAsk"]
+	if row.get("offer") != null:
+		out["offer"] = row["offer"]
+	if row.get("listed") != null:
+		out["listed"] = int(row["listed"]) == 1
+	if row.get("ask") != null:
+		out["ask"] = row["ask"]
+	if row.get("developing") != null:
+		out["developing"] = int(row["developing"]) == 1
+	if row.get("jobUse") != null:
+		out["jobUse"] = row["jobUse"]
+	if row.get("jobFloors") != null:
+		out["jobFloors"] = row["jobFloors"]
 	return out
 
 
@@ -825,7 +864,14 @@ func _on_page_opened(page: String) -> void:
 		"books":
 			_ui.set_books(_books)
 		"property":
-			_ui.set_property_overview(_enrich(_selected) if not _selected.is_empty() else {})
+			var card := _enrich(_selected) if not _selected.is_empty() else {}
+			_dev_options = []
+			if not card.is_empty() and bool(card.get("held", false)) \
+					and str(card.get("cls", "")) == "land" \
+					and not bool(card.get("developing", false)) \
+					and not bool(card.get("listed", false)):
+				_dev_options = _fetch_develop_options(str(card.get("bbl", "")))
+			_ui.set_property_overview(card, _dev_options)
 		_:
 			_ui.set_page_note("This desk is next. The engine already has the numbers; the export is not wired yet.")
 
@@ -911,6 +957,85 @@ func _buy_selected() -> void:
 		return
 	_load_game_hud()
 	_rebuild()
+	_refresh_open_page()
+
+
+func _list_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if not _selected.get("held", false):
+		return
+	await _run_verb("list", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _delist_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("delist", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _accept_offer() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("accept-offer", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _develop_selected(use: String, floors: int) -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("develop", PackedStringArray([
+			"--bbl=" + str(_selected.get("bbl", "")),
+			"--use=" + use, "--floors=%d" % floors]))
+
+
+func _fetch_develop_options(bbl: String) -> Array:
+	if _campaign_dir == "" or bbl == "":
+		return []
+	var runner := _resolve_runner()
+	if runner == "":
+		return []
+	_run_sim(PackedStringArray([runner, "develop-options", "--dir=" + _campaign_dir,
+			"--bbl=" + bbl]))
+	var doc: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/options.json"))
+	if doc is Dictionary:
+		return (doc as Dictionary).get("options", [])
+	return []
+
+
+func _run_verb(op: String, extra: PackedStringArray) -> void:
+	_busy = true
+	_ui.set_status(op + "...")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var meta: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
+	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
+	if runner == "" or not FileAccess.file_exists(runner):
+		runner = _resolve_runner()
+	var args := PackedStringArray([runner, op, "--dir=" + _campaign_dir])
+	args.append_array(extra)
+	var ran: Array = _run_sim(args)
+	var code: int = ran[0]
+	_busy = false
+	if code != 0:
+		var res: Variant = JSON.parse_string(
+				FileAccess.get_file_as_string(_campaign_dir + "/result.json"))
+		_ui.show_error(op.capitalize() + " failed", str((res as Dictionary).get("err", "?")) \
+				if res is Dictionary else "unknown error")
+		return
+	_load_game_hud()
+	_rebuild()
+	_refresh_open_page()
+
+
+func _refresh_open_page() -> void:
+	if _ui == null:
+		return
+	var page := _ui.current_page()
+	if page != "":
+		_on_page_opened(page)
+
 
 ## TAB walks the for-sale tape: camera flies to each listing, card shows it.
 func _cycle_listing() -> void:

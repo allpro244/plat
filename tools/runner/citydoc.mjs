@@ -24,7 +24,9 @@ export function buildCityDoc(E, city, g, extra = {}) {
       try { value = Math.round(E.landValue(rec, g.econ)); } catch { /* no read */ }
     }
     const li = (g.listings ?? []).find((l) => l.bbl === bbl);
+    const sale = g.holdings[bbl]?.sale;
     if (li) { ask = Math.round(li.ask); listed = 1; distress = li.distress ? 1 : 0; }
+    else if (sale?.ask) { ask = Math.round(sale.ask); listed = 1; }
     else if (g.approaches?.[bbl]?.ask) ask = Math.round(g.approaches[bbl].ask);
     parcels[bbl] = {
       occ,
@@ -209,7 +211,10 @@ function portfolioDesk(E, city, g) {
     }
     const basis = Math.round(h.costBasis ?? 0);
     const pmt = h.loan?.monthlyPmt ?? 0;
-    const ask = listedAsk(g, h.bbl);
+    const sale = h.sale;
+    const tapeAsk = listedAsk(g, h.bbl);
+    const ask = sale?.ask ?? tapeAsk;
+    const job = g.developments?.[h.bbl];
     totV += value; totNoi += noi; totDebt += debt;
     rows.push({
       bbl: h.bbl,
@@ -231,6 +236,12 @@ function portfolioDesk(E, city, g) {
       cond: h.condition ?? null,
       listed: ask != null ? 1 : 0,
       ask,
+      listAsk: value,
+      saleMode: sale?.mode ?? null,
+      offer: sale?.offer?.price ?? null,
+      developing: job ? 1 : 0,
+      jobUse: job?.use ?? null,
+      jobFloors: job?.floors ?? null,
     });
   }
   rows.sort((a, b) => b.value - a.value);

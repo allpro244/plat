@@ -7,6 +7,10 @@ signal advance_pressed
 signal year_pressed
 signal skip_pressed
 signal buy_pressed
+signal list_pressed
+signal delist_pressed
+signal accept_offer_pressed
+signal develop_pressed(use: String, floors: int)
 signal listing_chosen(bbl: String)
 signal page_opened(page: String)
 signal break_ground_pressed(size: String, density: String, cash: int)
@@ -37,6 +41,10 @@ var _grid: GridContainer
 var _deal_head: Label
 var _deal_note: Label
 var _buy_btn: Button
+var _list_btn: Button
+var _delist_btn: Button
+var _accept_btn: Button
+var _build_btn: Button
 var _full_btn: Button
 
 var _inbox: Panel
@@ -249,7 +257,7 @@ func _build_parcel() -> void:
 	_parcel.offset_left = -344
 	_parcel.offset_top = 108
 	_parcel.offset_right = -14
-	_parcel.offset_bottom = 520
+	_parcel.offset_bottom = 580
 	_parcel.add_theme_stylebox_override("panel", BwTheme.panel_bg())
 	_parcel.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_parcel)
@@ -314,6 +322,27 @@ func _build_parcel() -> void:
 	_buy_btn.add_theme_font_override("font", BwTheme.sans())
 	_buy_btn.pressed.connect(func() -> void: buy_pressed.emit())
 	body.add_child(_buy_btn)
+	_list_btn = _lens("List at appraisal", false)
+	_list_btn.visible = false
+	_list_btn.pressed.connect(func() -> void: list_pressed.emit())
+	body.add_child(_list_btn)
+	_delist_btn = _lens("Delist", false)
+	_delist_btn.visible = false
+	_delist_btn.pressed.connect(func() -> void: delist_pressed.emit())
+	body.add_child(_delist_btn)
+	_accept_btn = Button.new()
+	_accept_btn.visible = false
+	_accept_btn.text = "Accept offer"
+	_accept_btn.add_theme_stylebox_override("normal", BwTheme.buy_btn())
+	_accept_btn.add_theme_stylebox_override("hover", BwTheme.buy_btn())
+	_accept_btn.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
+	_accept_btn.add_theme_color_override("font_color", Color("#f6efdc"))
+	_accept_btn.pressed.connect(func() -> void: accept_offer_pressed.emit())
+	body.add_child(_accept_btn)
+	_build_btn = _lens("Build…", false)
+	_build_btn.visible = false
+	_build_btn.pressed.connect(func() -> void: open_page("property"))
+	body.add_child(_build_btn)
 	_full_btn = _lens("Full view", false)
 	_full_btn.pressed.connect(func() -> void: open_page("property"))
 	body.add_child(_full_btn)
@@ -495,8 +524,12 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 		_add_chip(str(b.get("district", "")).to_upper(), BwTheme.INK_DIM, true)
 	if b.get("held", false):
 		_add_chip("OWNED", BwTheme.GOLD)
-	if b.get("listed", false) and not b.get("held", false):
+	if b.get("listed", false) and b.get("held", false):
+		_add_chip("ON THE MARKET", BwTheme.TEAL)
+	elif b.get("listed", false):
 		_add_chip("FOR SALE", BwTheme.TEAL)
+	if b.get("developing", false):
+		_add_chip("UNDER CONSTRUCTION", BwTheme.GOLD)
 	if b.get("distress", false):
 		_add_chip("MOTIVATED", BwTheme.DANGER)
 	_clear(_grid)
@@ -516,23 +549,42 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 		_grid_row("Basis", _usd(float(b["basis"])))
 	if float(b.get("debt", -1.0)) > 0.0:
 		_grid_row("Debt", _usd(float(b["debt"])))
+	var ours: bool = bool(b.get("held", false))
+	var our_list: bool = ours and bool(b.get("listed", false))
+	var offer := float(b.get("offer", -1.0))
+	var land: bool = str(b.get("cls", "")) == "land"
+	_buy_btn.visible = false
+	_list_btn.visible = false
+	_delist_btn.visible = false
+	_accept_btn.visible = false
+	_build_btn.visible = false
 	if listed:
 		_deal_head.text = "For sale"
 		_deal_note.text = "Ask %s%s" % [_usd(float(b.get("ask", 0.0))),
 				" — motivated seller" if b.get("distress", false) else ""]
 		_buy_btn.visible = campaign
+	elif ours and offer > 0.0:
+		_deal_head.text = "Offer in hand"
+		_deal_note.text = "They will pay %s." % _usd(offer)
+		_accept_btn.visible = campaign
+		_delist_btn.visible = campaign
+	elif our_list:
+		_deal_head.text = "On the market"
+		_deal_note.text = "Ask %s — waiting for the phone." % _usd(float(b.get("ask", 0.0)))
+		_delist_btn.visible = campaign
+	elif ours:
+		_deal_head.text = "Your holding"
+		_deal_note.text = "This deed is on your balance sheet."
+		_list_btn.visible = campaign and float(b.get("listAsk", b.get("value", 0.0))) > 0.0
+		if _list_btn.visible:
+			_list_btn.text = "List at %s" % _usd(float(b.get("listAsk", b.get("value", 0.0))))
+		_build_btn.visible = campaign and land and not bool(b.get("developing", false))
 	elif has_ask:
 		_deal_head.text = "Off-market"
 		_deal_note.text = "Indicative ask %s" % _usd(float(b["ask"]))
-		_buy_btn.visible = false
-	elif b.get("held", false):
-		_deal_head.text = "Your holding"
-		_deal_note.text = "This deed is on your balance sheet."
-		_buy_btn.visible = false
 	else:
 		_deal_head.text = ""
 		_deal_note.text = ""
-		_buy_btn.visible = false
 
 
 func hide_parcel() -> void:
@@ -559,6 +611,10 @@ func show_error(title: String, detail: String) -> void:
 	_deal_head.text = ""
 	_deal_note.text = detail
 	_buy_btn.visible = false
+	_list_btn.visible = false
+	_delist_btn.visible = false
+	_accept_btn.visible = false
+	_build_btn.visible = false
 
 
 func open_page(page: String) -> void:
@@ -762,7 +818,7 @@ func set_books(doc: Dictionary) -> void:
 		_page_body.add_child(lab)
 
 
-func set_property_overview(b: Dictionary) -> void:
+func set_property_overview(b: Dictionary, options: Array = []) -> void:
 	_clear(_page_body)
 	_add_room_nav("property")
 	if b.is_empty():
@@ -791,7 +847,11 @@ func set_property_overview(b: Dictionary) -> void:
 		_kv("Basis", _usd(float(b["basis"])))
 	if float(b.get("debt", -1.0)) > 0.0:
 		_kv("Debt", _usd(float(b["debt"])))
-	if bool(b.get("listed", false)) and not bool(b.get("held", false)) and float(b.get("ask", 0)) > 0.0:
+	var held: bool = bool(b.get("held", false))
+	var listed: bool = bool(b.get("listed", false))
+	var offer := float(b.get("offer", -1.0))
+	var land: bool = str(b.get("cls", "")) == "land"
+	if listed and not held and float(b.get("ask", 0)) > 0.0:
 		_kv("Ask", _usd(float(b["ask"])))
 		var buy := Button.new()
 		buy.text = "Buy at ask"
@@ -803,6 +863,66 @@ func set_property_overview(b: Dictionary) -> void:
 			hide_page()
 			buy_pressed.emit())
 		_page_body.add_child(buy)
+	elif held and offer > 0.0:
+		_kv("Offer", _usd(offer))
+		var acc := Button.new()
+		acc.text = "Accept offer"
+		acc.add_theme_stylebox_override("normal", BwTheme.buy_btn())
+		acc.add_theme_stylebox_override("hover", BwTheme.buy_btn())
+		acc.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
+		acc.add_theme_color_override("font_color", Color("#f6efdc"))
+		acc.pressed.connect(func() -> void:
+			hide_page()
+			accept_offer_pressed.emit())
+		_page_body.add_child(acc)
+		var pull := _lens("Delist", false)
+		pull.pressed.connect(func() -> void: delist_pressed.emit())
+		_page_body.add_child(pull)
+	elif held and listed:
+		_kv("Your ask", _usd(float(b.get("ask", 0))))
+		_note("On the market. The engine will bring offers; you do not invent a buyer.")
+		var pull := _lens("Delist", false)
+		pull.pressed.connect(func() -> void: delist_pressed.emit())
+		_page_body.add_child(pull)
+	elif held:
+		var ask := float(b.get("listAsk", b.get("value", 0.0)))
+		if ask > 0.0:
+			var list := _lens("List quietly at %s" % _usd(ask), false)
+			list.pressed.connect(func() -> void: list_pressed.emit())
+			_page_body.add_child(list)
+	if held and land and not bool(b.get("developing", false)):
+		var head := Label.new()
+		head.text = "BUILD"
+		BwTheme.style_label(head, 10, false, true)
+		_page_body.add_child(head)
+		if options.is_empty():
+			_note("No programmes underwritten on this lot.")
+		else:
+			_note("The engine underwrote these. A row that does not pencil still runs — the error is the engine's.")
+			for o in options:
+				var use := str(o.get("use", ""))
+				var floors := int(o.get("floors", 0))
+				var why = o.get("why")
+				var mark := "pencils" if bool(o.get("clears", false)) else (
+						str(why) if why != null and str(why) != "<null>" else "does not pencil")
+				var line := "%s    %d fl    %s sf    %s    %s" % [
+						use, floors, _fmt_sf(float(o.get("sf", 0))),
+						_usd(float(o.get("cost", 0))), mark]
+				var bld := Button.new()
+				bld.text = line
+				bld.alignment = HORIZONTAL_ALIGNMENT_LEFT
+				bld.add_theme_stylebox_override("normal", BwTheme.start_opt(bool(o.get("clears", false))))
+				bld.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
+				bld.add_theme_color_override("font_color", BwTheme.INK)
+				bld.add_theme_font_override("font", BwTheme.mono())
+				bld.add_theme_font_size_override("font_size", 12)
+				var u := use
+				var f := floors
+				bld.pressed.connect(func() -> void: develop_pressed.emit(u, f))
+				_page_body.add_child(bld)
+	elif held and bool(b.get("developing", false)):
+		_note("Cranes on site: %s, %s floors." % [
+				str(b.get("jobUse", "building")), str(b.get("jobFloors", "?"))])
 	var map := _lens("Show on the map", false)
 	map.pressed.connect(hide_page)
 	_page_body.add_child(map)

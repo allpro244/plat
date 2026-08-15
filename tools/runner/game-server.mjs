@@ -139,6 +139,61 @@ if (cmd === "new") {
   }
   writeFileSync(join(dir, "options.json"), JSON.stringify({ bbl, options }));
   console.log(`${options.length} designs underwritten for ${bbl} -> options.json`);
+} else if (cmd === "list") {
+  // LIST AT APPRAISAL (or --ask=). Quiet is the default; --mode=marketed
+  // runs a process. The engine names the fee and the wait.
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const mode = arg("mode", "quiet") === "marketed" ? "marketed" : "quiet";
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const h = g.holdings?.[bbl];
+  let ask = Math.max(0, parseInt(arg("ask", "0"), 10) || 0);
+  if (!(ask > 0) && h) {
+    try { ask = Math.round(E.ownedHoldingValue(g, city.parcels, h)); } catch { /* */ }
+  }
+  const r = E.listForSale(g, city.parcels, bbl, ask, mode);
+  const result = { op: "list", bbl, ask: Math.round(ask), mode, ok: !r.err, err: r.err ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("LIST FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`LISTED ${bbl} at $${(ask / 1e6).toFixed(2)}M (${mode})`);
+} else if (cmd === "delist") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  if (!g.holdings?.[bbl]) {
+    const result = { op: "delist", bbl, ok: false, err: "You don't own that parcel." };
+    writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+    console.error("DELIST FAILED: " + result.err);
+    process.exit(2);
+  }
+  g = E.delist(g, bbl);
+  writeFileSync(join(dir, "result.json"), JSON.stringify({ op: "delist", bbl, ok: true, err: null }));
+  writeAll(meta, city, g);
+  console.log(`DELISTED ${bbl}`);
+} else if (cmd === "accept-offer") {
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const bbl = arg("bbl", "");
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.acceptSaleOffer(g, city.parcels, bbl);
+  const result = { op: "accept-offer", bbl, ok: !r.err, err: r.err ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("ACCEPT FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`SOLD ${bbl}`);
 } else if (cmd === "develop") {
   const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
   const bbl = arg("bbl", "");
@@ -158,6 +213,6 @@ if (cmd === "new") {
   writeAll(meta, city, g);
   console.log(`DEVELOPING ${bbl}: ${floors}-floor ${use}`);
 } else {
-  console.error("usage: game-server.mjs new|advance|buy|develop-options|develop --dir=D [--seed --size --density --cash --months --until=attention --bbl --use --floors]");
+  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|develop-options|develop --dir=D [--seed --size --density --cash --months --until=attention --bbl --ask --mode --use --floors]");
   process.exit(1);
 }
