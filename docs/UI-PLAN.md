@@ -452,17 +452,23 @@ become files, not logs.
   plus a top-edge hairline on the page sheet. FPS leaves the bar —
   it is not a vital.
 
-Still stubs: Notes, Leasing, Staff, Research. Lease letters wait
-for a building with tenants. Do not open those rooms as pretty
-empty tables.
+Still stubs: Notes, Staff, Research. Do not open those rooms as
+pretty empty tables.
 
-U8 (this cut): the contract path. Buy at ask stays the cash
+U8 (shipped): the contract path. Buy at ask stays the cash
 shortcut. Offer at ask calls the engine's `negotiate` at the
 listing ask — no bid slider, no invented default. A number that
 clears their reserve is a handshake and a 1.5% deposit, not a
 deed. The Deals desk lists talks (contracts first). Close funds
 the agreed price; Walk tears it up; Accept their number takes a
 counter. Seller reserve is not exported.
+
+U10 (this cut): the first lease. Buy a building with floors
+(not vacant dirt). `respond-loi` accept / pass — no rent slider.
+`desks/leasing.json` is the roll and the letters. The Leasing
+room and the property Rent roll tab paint them. Accept / Pass
+also sit on Deals, where the inbox already routes a letter.
+Signing cost is `loiSigningCost`. Counter waits.
 
 U5 leftover + U9 inbox / map HUD (this cut): the city tells you
 what to do, and a room owns the screen.
@@ -496,4 +502,6 @@ what to do, and a room owns the screen.
 - `renders/ui_inbox.png` — year-one milestone on the map
 - `renders/ui_map.png` — inbox + map HUD after the first deed
 - `renders/ui_deals.png` — under contract after Offer at ask
+- `renders/ui_leasing.png` — renewal letter on the roll
+- `renders/ui_leased.png` — after Accept
 - `renders/playable_selftest.png` — the click path that produced them

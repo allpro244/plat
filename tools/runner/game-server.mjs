@@ -359,7 +359,26 @@ if (cmd === "new") {
   g = r.s;
   writeAll(meta, city, g);
   console.log(`CLOSED ${bbl}${r.msg ? " — " + r.msg : ""}`);
+} else if (cmd === "respond-loi") {
+  // ACCEPT or PASS a letter. Counter waits — plat does not invent a rent.
+  const meta = JSON.parse(readFileSync(join(dir, "campaign.json"), "utf8"));
+  const id = parseInt(arg("id", "0"), 10) || 0;
+  const action = arg("action", "accept") === "decline" ? "decline" : "accept";
+  const fund = arg("fund", "") === "1";
+  const city = buildParcels(meta);
+  let g = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+  const r = E.respondLOI(g, city.parcels, id, action, fund);
+  const result = { op: "respond-loi", id, action, ok: !r.err, err: r.err ?? null, msg: r.msg ?? null };
+  writeFileSync(join(dir, "result.json"), JSON.stringify(result));
+  if (r.err) {
+    console.error("LOI FAILED: " + r.err);
+    writeAll(meta, city, g);
+    process.exit(2);
+  }
+  g = r.s;
+  writeAll(meta, city, g);
+  console.log(`${action.toUpperCase()} LOI ${id}${r.msg ? " — " + r.msg : ""}`);
 } else {
-  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|offer|walk|accept-counter|close|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
+  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|offer|walk|accept-counter|close|respond-loi|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
   process.exit(1);
 }

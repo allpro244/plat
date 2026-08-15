@@ -91,6 +91,7 @@ var _dev_options: Array = []
 var _refi_quotes: Array = []
 var _map_desk: Dictionary = {}
 var _deals: Dictionary = {}
+var _leasing: Dictionary = {}
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -130,6 +131,7 @@ func _ready() -> void:
 	_ui.walk_pressed.connect(_walk_selected)
 	_ui.accept_counter_pressed.connect(_accept_counter)
 	_ui.close_deal_pressed.connect(_close_selected)
+	_ui.loi_pressed.connect(_respond_loi)
 	_ui.list_pressed.connect(_list_selected)
 	_ui.delist_pressed.connect(_delist_selected)
 	_ui.accept_offer_pressed.connect(_accept_offer)
@@ -391,6 +393,50 @@ func _run_selftest() -> void:
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_books.png")
+			# A building with floors, then a letter. Vacant dirt has no roll.
+			var lot_bbl := str(_selected.get("bbl", ""))
+			_pick_affordable_commercial()
+			if not _selected.is_empty() and str(_selected.get("bbl", "")) != lot_bbl:
+				print("[plat] selftest commercial: ", _ui.parcel_debug_text())
+				await _offer_selected()
+				while _busy:
+					await get_tree().process_frame
+				await _close_selected()
+				while _busy:
+					await get_tree().process_frame
+				print("[plat] selftest commercial close: cash $%.2fM holdings %d" % [
+						float(_hud_game.get("cash", 0)) / 1e6,
+						int(_hud_game.get("holdings", 0))])
+				await _advance_campaign(18, true)
+				while _busy:
+					await get_tree().process_frame
+				print("[plat] selftest wait letter: month %s letters %d" % [
+						str(_hud_game.get("date", "?")),
+						int((_leasing.get("letters", []) as Array).size())])
+				_ui.open_page("leasing")
+				_on_page_opened("leasing")
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_leasing.png")
+				var lid := _first_letter_id()
+				if lid > 0:
+					await _respond_loi(lid, "accept")
+					while _busy:
+						await get_tree().process_frame
+					print("[plat] selftest accept letter %d: next=%s letters %d" % [
+							lid, str(_hud_game.get("next", {})),
+							int((_leasing.get("letters", []) as Array).size())])
+					_ui.open_page("leasing")
+					_on_page_opened("leasing")
+					for i in range(10):
+						await get_tree().process_frame
+					await _save_frame("renders/ui_leased.png")
+				else:
+					printerr("[plat] selftest letter FAILED: no LOI after advance")
+			else:
+				printerr("[plat] selftest commercial FAILED: no affordable office/retail")
+			if lot_bbl != "":
+				_focus_listing(lot_bbl)
 			# Draw the available line before Advance — idle cash above $250k
 			# sweeps it on the next month tick.
 			var loc0: Dictionary = _debt.get("loc", {})
@@ -879,7 +925,9 @@ func _load_desks() -> void:
 	_books = _desk_file("books")
 	_map_desk = _desk_file("map")
 	_deals = _desk_file("deals")
+	_leasing = _desk_file("leasing")
 	_ui.set_map_hud(_map_desk)
+	_ui.set_leasing(_leasing)
 
 
 func _desk_file(name: String) -> Dictionary:
@@ -946,6 +994,8 @@ func _on_page_opened(page: String) -> void:
 			_ui.set_market_rows(_market_rows)
 		"deals":
 			_ui.set_deals(_deals)
+		"leasing":
+			_ui.set_leasing(_leasing)
 		"portfolio":
 			_ui.set_portfolio(_portfolio)
 		"news":
@@ -1059,6 +1109,13 @@ func _close_selected() -> void:
 	if _busy or _campaign_dir == "" or _selected.is_empty():
 		return
 	await _run_verb("close", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _respond_loi(id: int, action: String) -> void:
+	if _busy or _campaign_dir == "" or id <= 0:
+		return
+	var act := "decline" if action == "decline" else "accept"
+	await _run_verb("respond-loi", PackedStringArray(["--id=%d" % id, "--action=" + act]))
 
 
 func _buy_selected() -> void:
@@ -1228,6 +1285,51 @@ func _cycle_listing() -> void:
 	var c := (b["bbox"] as Rect2).get_center()
 	_g_target = c
 	_show_card(b)
+
+## Cheapest listed office/retail/industrial with vacancy. Multifamily
+## lets itself; dirt has no roll.
+func _pick_affordable_commercial() -> void:
+	if city == null or city._import == null:
+		return
+	var cash := float(_hud_game.get("cash", 0))
+	var best: Dictionary = {}
+	var best_occ := 2.0
+	var best_ask := 1e18
+	for b in city._import.buildings:
+		if not b.get("listed", false) or b.get("held", false) or b.get("deco", false):
+			continue
+		var cls := str(b.get("cls", ""))
+		if cls == "land" or cls == "multifamily":
+			continue
+		var ask := float(b.get("ask", 0.0))
+		if ask <= 0.0 or ask > cash:
+			continue
+		var occ := float(b.get("occ", 1.0))
+		if occ < 0.0:
+			occ = 1.0
+		if occ < best_occ or (is_equal_approx(occ, best_occ) and ask < best_ask):
+			best = b
+			best_occ = occ
+			best_ask = ask
+	if best.is_empty():
+		_selected = {}
+		return
+	var c := (best["bbox"] as Rect2).get_center()
+	_g_target = c
+	_target = c
+	_push()
+	_show_card(best)
+
+
+func _first_letter_id() -> int:
+	for l in _leasing.get("letters", []):
+		if l is Dictionary and int(l.get("id", 0)) > 0:
+			return int(l.get("id", 0))
+	for l in _deals.get("lois", []):
+		if l is Dictionary and int(l.get("id", 0)) > 0:
+			return int(l.get("id", 0))
+	return 0
+
 
 ## Cheapest listed lot the firm can actually pay for — the selftest deal.
 func _pick_affordable_listing() -> void:

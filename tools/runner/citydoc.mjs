@@ -110,7 +110,8 @@ export function hudOf(E, city, g) {
     yearOne: yo.yearOne,
     monthsLeft: yo.monthsLeft,
     next: yo.next,
-    deals: Object.keys(g.talks ?? {}).length,
+    deals: Object.keys(g.talks ?? {}).length + principalLetters(E, g).length,
+    letters: principalLetters(E, g).length,
   };
 }
 
@@ -154,6 +155,12 @@ function readVitals(E, city, g) {
         page = r.page ?? "deals";
         bbl = r.bbl ?? null;
       } catch { /* */ }
+      if (!bbl && String(a.key).startsWith("loi:")) {
+        const id = Number(String(a.key).split(":")[1]);
+        const l = (g.lois ?? []).find((x) => x.id === id);
+        if (l) bbl = l.bbl;
+        page = page || "deals";
+      }
       attn.push({ key: a.key, label: a.label, page, bbl });
     }
   } catch { /* */ }
@@ -189,6 +196,108 @@ export function writeDesks(E, city, g, dir) {
   writeFileSync(join(dir, "desks", "books.json"), JSON.stringify(booksDesk(g, nw, cf)));
   writeFileSync(join(dir, "desks", "map.json"), JSON.stringify(mapDesk(E, city, g, attn)));
   writeFileSync(join(dir, "desks", "deals.json"), JSON.stringify(dealsDesk(E, city, g)));
+  writeFileSync(join(dir, "desks", "leasing.json"), JSON.stringify(leasingDesk(E, city, g)));
+}
+
+/** Letters the principal still owns. Staff / agent coverage is the engine's. */
+function principalLetters(E, g) {
+  const out = [];
+  for (const l of (g.lois ?? [])) {
+    try {
+      if (typeof E.loiNeedsPrincipal === "function" && !E.loiNeedsPrincipal(g, l)) continue;
+    } catch { /* */ }
+    out.push(l);
+  }
+  return out;
+}
+
+/** Engine CREDIT_LABEL is C/B/A. A display table, not a quantity. */
+function creditLabel(n) {
+  return ["C", "B", "A"][n] ?? String(n ?? "");
+}
+
+function letterOf(E, city, g, l) {
+  const rec = E.resolveRec(city.parcels, g, l.bbl);
+  let signing = null;
+  try {
+    const h = g.holdings?.[l.bbl];
+    const fee = h && E.exclusiveFeeRate ? E.exclusiveFeeRate(h) : undefined;
+    signing = Math.round(E.loiSigningCost(l, fee));
+  } catch { /* */ }
+  return {
+    id: l.id,
+    bbl: l.bbl,
+    address: rec?.address ?? l.bbl,
+    name: l.name ?? "",
+    kind: l.kind ?? "new",
+    use: l.use ?? rec?.class ?? "",
+    sf: Math.round(l.sf ?? 0),
+    rentPsf: l.rentPsf ?? null,
+    termM: l.termM ?? null,
+    tiPsf: l.tiPsf ?? 0,
+    freeM: l.freeM ?? 0,
+    bumpPct: l.bumpPct ?? null,
+    credit: creditLabel(l.credit),
+    sector: l.sector ?? "",
+    expires: l.expiresM != null ? monthLabel(l.expiresM) : null,
+    monthsLeft: l.expiresM != null ? l.expiresM - (g.month ?? 0) : null,
+    signing,
+    stage: l.stage ?? "open",
+    referred: !!l.referred,
+  };
+}
+
+function leasingDesk(E, city, g) {
+  const buildings = [];
+  let leasedSf = 0, vacantSf = 0, noi = 0;
+  for (const h of holdingsOf(g)) {
+    const rec = E.resolveRec(city.parcels, g, h.bbl);
+    if (!rec || rec.class === "land") continue;
+    const tenants = (h.tenants ?? []).map((t) => ({
+      name: t.name ?? "",
+      use: t.use ?? rec.class ?? "",
+      sector: t.sector ?? "",
+      credit: creditLabel(t.credit),
+      sf: Math.round(t.sf ?? 0),
+      rentPsf: t.rentPsf ?? null,
+      start: monthLabel(t.startM),
+      end: monthLabel(t.endM),
+      monthsLeft: t.endM != null ? t.endM - (g.month ?? 0) : null,
+    }));
+    let occ = null, vac = 0, holdingNoi = 0;
+    try {
+      if (!E.isLeasedFee?.(h)) occ = +E.physicalOcc(rec, h).toFixed(3);
+    } catch { /* */ }
+    try { vac = Math.round(E.vacantSf(rec, h)); } catch { /* */ }
+    try { holdingNoi = Math.round(E.ownedHoldingNoiYr(g, city.parcels, h)); } catch { /* */ }
+    const letSf = tenants.reduce((a, t) => a + t.sf, 0);
+    leasedSf += letSf;
+    vacantSf += vac;
+    noi += holdingNoi;
+    buildings.push({
+      bbl: h.bbl,
+      address: rec.address ?? h.bbl,
+      cls: rec.class ?? "",
+      sf: rec.bldgArea ?? 0,
+      occ,
+      vacantSf: vac,
+      noi: holdingNoi,
+      tenants,
+    });
+  }
+  buildings.sort((a, b) => (b.vacantSf ?? 0) - (a.vacantSf ?? 0) || (b.sf ?? 0) - (a.sf ?? 0));
+  const letters = principalLetters(E, g).map((l) => letterOf(E, city, g, l));
+  return {
+    buildings,
+    letters,
+    totals: {
+      n: buildings.length,
+      leasedSf: Math.round(leasedSf),
+      vacantSf: Math.round(vacantSf),
+      noi,
+      letters: letters.length,
+    },
+  };
 }
 
 /** Live talks, inbound sale offers, and letters — view models only. */
@@ -217,21 +326,7 @@ function dealsDesk(E, city, g) {
   }
   talks.sort((a, b) => (b.agreed ? 1 : 0) - (a.agreed ? 1 : 0)
     || (a.monthsLeft ?? 99) - (b.monthsLeft ?? 99));
-  const lois = [];
-  for (const l of (g.lois ?? [])) {
-    const rec = E.resolveRec(city.parcels, g, l.bbl);
-    lois.push({
-      id: l.id,
-      bbl: l.bbl,
-      address: rec?.address ?? l.bbl,
-      name: l.name ?? "",
-      kind: l.kind ?? "new",
-      sf: Math.round(l.sf ?? 0),
-      rentPsf: l.rentPsf ?? null,
-      expires: l.expiresM != null ? monthLabel(l.expiresM) : null,
-      monthsLeft: l.expiresM != null ? l.expiresM - (g.month ?? 0) : null,
-    });
-  }
+  const lois = principalLetters(E, g).map((l) => letterOf(E, city, g, l));
   const inbound = [];
   for (const h of holdingsOf(g)) {
     const offer = h.sale?.offer;

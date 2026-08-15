@@ -11,6 +11,7 @@ signal offer_pressed
 signal walk_pressed
 signal accept_counter_pressed
 signal close_deal_pressed
+signal loi_pressed(id: int, action: String)
 signal list_pressed
 signal delist_pressed
 signal accept_offer_pressed
@@ -79,6 +80,7 @@ var _page_name := ""
 var _lenses: Dictionary = {}
 var _market_rows: Array = []
 var _deals: Dictionary = {}
+var _leasing: Dictionary = {}
 var _market_cls := "all"
 var _prop_tab := "overview"
 var _prop_building: Dictionary = {}
@@ -518,6 +520,9 @@ func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
 	var deals_n := int(hud.get("deals", 0))
 	if _job_btns.has("acquire"):
 		_job_btns["acquire"].text = ("Acquire · %d" % deals_n) if deals_n > 0 else "Acquire"
+	var letters_n := int(hud.get("letters", 0))
+	if _job_btns.has("assets"):
+		_job_btns["assets"].text = ("Assets · %d" % letters_n) if letters_n > 0 else "Assets"
 	var items: Array = hud.get("attentionItems", [])
 	if items.is_empty():
 		for s in hud.get("attention", []):
@@ -886,7 +891,7 @@ func _paint_deals() -> void:
 		["Under contract", str(int(counts.get("agreed", 0)))],
 		["Letters", str(int(counts.get("lois", lois.size())))],
 	])
-	if talks.is_empty() and inbound.is_empty():
+	if talks.is_empty() and inbound.is_empty() and lois.is_empty():
 		_note("Nothing on the table. Open a listing and offer at ask — you can run %d at once." % max_n)
 		var go := _lens("Marketplace →", false)
 		go.pressed.connect(func() -> void: open_page("market"))
@@ -904,13 +909,9 @@ func _paint_deals() -> void:
 		head.text = "LETTERS OF INTENT"
 		BwTheme.style_label(head, 10, false, true)
 		_page_body.add_child(head)
-		_note("Letters wait for the leasing cut. The engine already has them; plat does not invent a rent.")
+		_note("The rent, the term, and the signing cost are the engine's. Accept or pass — plat does not invent a number.")
 		for l in lois:
-			_note("%s · %s · %s sf · answer by %s" % [
-					str(l.get("name", "?")),
-					str(l.get("address", l.get("bbl", "?"))),
-					_fmt_sf(float(l.get("sf", 0))),
-					str(l.get("expires", "?"))])
+			_paint_letter_card(l)
 
 
 func _paint_talk_card(t: Dictionary) -> void:
@@ -957,6 +958,108 @@ func _paint_talk_card(t: Dictionary) -> void:
 		walk_pressed.emit())
 	row.add_child(walk)
 	var map := _lens("Show on the map", false)
+	map.pressed.connect(func() -> void:
+		listing_chosen.emit(bbl)
+		hide_page())
+	row.add_child(map)
+
+
+func set_leasing(doc: Dictionary) -> void:
+	_leasing = doc
+	if _page_name == "leasing":
+		_paint_leasing()
+
+
+func _paint_leasing() -> void:
+	_clear(_page_body)
+	_add_room_nav("leasing")
+	var buildings: Array = _leasing.get("buildings", [])
+	var letters: Array = _leasing.get("letters", [])
+	var tot: Dictionary = _leasing.get("totals", {})
+	if buildings.is_empty():
+		_note("No buildings to let. Buy a deed that has floors, then wait for the market to write.")
+		var go := _lens("Acquire →", false)
+		go.pressed.connect(func() -> void: open_page("market"))
+		_page_body.add_child(go)
+		return
+	_stat_strip([
+		["Buildings", str(int(tot.get("n", buildings.size())))],
+		["Let", _fmt_sf(float(tot.get("leasedSf", 0))) + " sf"],
+		["Vacant", _fmt_sf(float(tot.get("vacantSf", 0))) + " sf"],
+		["Letters", str(int(tot.get("letters", letters.size())))],
+	])
+	if not letters.is_empty():
+		var head := Label.new()
+		head.text = "ON THE DESK"
+		BwTheme.style_label(head, 10, false, true)
+		_page_body.add_child(head)
+		for l in letters:
+			_paint_letter_card(l)
+	for b in buildings:
+		var title := Label.new()
+		title.text = str(b.get("address", b.get("bbl", "?")))
+		title.add_theme_font_override("font", BwTheme.serif())
+		title.add_theme_font_size_override("font_size", 18)
+		title.add_theme_color_override("font_color", BwTheme.INK)
+		_page_body.add_child(title)
+		var occ = b.get("occ")
+		_note("%s · %s sf · occ %s · vacant %s sf" % [
+				_class_title(str(b.get("cls", "?"))),
+				_fmt_sf(float(b.get("sf", 0))),
+				("—" if occ == null else "%.0f%%" % (float(occ) * 100.0)),
+				_fmt_sf(float(b.get("vacantSf", 0)))])
+		var tenants: Array = b.get("tenants", [])
+		if tenants.is_empty():
+			_note("The roll is empty.")
+			continue
+		_sheet_head([
+			["Tenant", 0, false], ["Sf", 72, true], ["$/sf", 64, true],
+			["Expires", 88, true],
+		])
+		for t in tenants:
+			var rpsf = t.get("rentPsf")
+			_sheet_row([
+				[str(t.get("name", "?")), 0, false],
+				[_fmt_sf(float(t.get("sf", 0))), 72, true],
+				["—" if rpsf == null else "$%.2f" % float(rpsf), 64, true],
+				[str(t.get("end", "?")), 88, true],
+			], str(b.get("bbl", "")), false)
+
+
+func _paint_letter_card(l: Dictionary) -> void:
+	var id := int(l.get("id", 0))
+	var title := Label.new()
+	title.text = "%s · %s" % [str(l.get("name", "?")), str(l.get("address", l.get("bbl", "?")))]
+	title.add_theme_font_override("font", BwTheme.serif())
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", BwTheme.INK)
+	_page_body.add_child(title)
+	var kind := str(l.get("kind", "new"))
+	var rpsf = l.get("rentPsf")
+	var rent_s := "—" if rpsf == null else "$%.2f/sf" % float(rpsf)
+	var term := int(l.get("termM", 0))
+	var sign = l.get("signing")
+	_note("%s · %s · %s sf · %s · %d mo · TI $%s/sf · %s mo free · answer by %s%s" % [
+			kind,
+			str(l.get("credit", "")),
+			_fmt_sf(float(l.get("sf", 0))),
+			rent_s,
+			term,
+			str(int(round(float(l.get("tiPsf", 0))))),
+			str(int(l.get("freeM", 0))),
+			str(l.get("expires", "?")),
+			"" if sign == null else " · signing %s" % _usd(float(sign))])
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_page_body.add_child(row)
+	var acc := _ink_buy("Accept")
+	acc.pressed.connect(func() -> void: loi_pressed.emit(id, "accept"))
+	row.add_child(acc)
+	var pas := _lens("Pass", false)
+	pas.pressed.connect(func() -> void: loi_pressed.emit(id, "decline"))
+	row.add_child(pas)
+	var map := _lens("Show on the map", false)
+	var bbl := str(l.get("bbl", ""))
 	map.pressed.connect(func() -> void:
 		listing_chosen.emit(bbl)
 		hide_page())
@@ -1257,6 +1360,8 @@ func _paint_property() -> void:
 	tabs.append(["sell" if held else "acquire", "Sell" if held else "Acquire"])
 	if held and land and not listed:
 		tabs.append(["build", "Build"])
+	if held and not land:
+		tabs.append(["roll", "Rent roll"])
 	if held:
 		tabs.append(["refi", "Refinance"])
 	var ids: Array = []
@@ -1287,6 +1392,8 @@ func _paint_property() -> void:
 			_paint_prop_deal(b, held, listed)
 		"build":
 			_paint_prop_build(b, developing)
+		"roll":
+			_paint_prop_roll(b)
 		"refi":
 			_paint_prop_refi()
 		_:
@@ -1385,6 +1492,45 @@ func _paint_prop_deal(b: Dictionary, held: bool, listed: bool) -> void:
 			_note("No appraisal to list against.")
 	else:
 		_note("This lot is not for sale.")
+
+
+func _paint_prop_roll(b: Dictionary) -> void:
+	var blk := _leasing_building(str(b.get("bbl", "")))
+	var tenants: Array = blk.get("tenants", [])
+	var occ = blk.get("occ", b.get("occ"))
+	_stat_strip([
+		["Occupancy", ("—" if occ == null else "%.0f%%" % (float(occ) * 100.0))],
+		["Vacant", _fmt_sf(float(blk.get("vacantSf", 0))) + " sf"],
+		["Tenants", str(tenants.size())],
+	])
+	if tenants.is_empty():
+		_note("The roll is empty. Vacant space draws letters; they land on Deals and Leasing.")
+		return
+	_sheet_head([
+		["Tenant", 0, false], ["Sf", 72, true], ["$/sf", 64, true],
+		["Expires", 88, true],
+	])
+	for t in tenants:
+		var rpsf = t.get("rentPsf")
+		_sheet_row([
+			[str(t.get("name", "?")), 0, false],
+			[_fmt_sf(float(t.get("sf", 0))), 72, true],
+			["—" if rpsf == null else "$%.2f" % float(rpsf), 64, true],
+			[str(t.get("end", "?")), 88, true],
+		])
+	for l in _leasing.get("letters", []):
+		if str(l.get("bbl", "")) != str(b.get("bbl", "")):
+			continue
+		_paint_letter_card(l)
+
+
+func _leasing_building(bbl: String) -> Dictionary:
+	if bbl == "":
+		return {}
+	for row in _leasing.get("buildings", []):
+		if row is Dictionary and str(row.get("bbl", "")) == bbl:
+			return row
+	return {}
 
 
 func _paint_prop_build(b: Dictionary, developing: bool) -> void:
@@ -1488,6 +1634,8 @@ func _page_meta(page: String) -> PackedStringArray:
 				"Distressed paper — export not wired yet."])
 		"portfolio": return PackedStringArray(["Assets", "Portfolio",
 				"Your deeds. Click a row to open the file."])
+		"leasing": return PackedStringArray(["Assets", "Leasing",
+				"The roll and the letters. Accept or pass — the rent is the engine's."])
 		"property": return PackedStringArray(["Assets", "Property",
 				"The complete file. Tabs for the desks this deed has."])
 		"debt": return PackedStringArray(["Capital", "Debt",
@@ -1520,7 +1668,7 @@ func _siblings_of(page: String) -> Array:
 		"acquire":
 			return [["market", "Marketplace"], ["deals", "Deals"], ["notes", "Notes"]]
 		"assets":
-			return [["portfolio", "Portfolio"], ["property", "Property"]]
+			return [["portfolio", "Portfolio"], ["leasing", "Leasing"], ["property", "Property"]]
 		"capital":
 			return [["debt", "Debt"], ["books", "Books"]]
 		"world":
