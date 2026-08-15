@@ -2,7 +2,7 @@ class_name CityScene
 extends Node3D
 ## Assembles the whole world from a parameter dictionary: environment + HDRI
 ## sky, sun from real solar position, ground plane, the generated block, and
-## the banded camera rig. Everything stochastic flows from params.seed —
+## the free-flow camera rig. Everything stochastic flows from params.seed —
 ## nothing in here is hand-placed.
 
 const ASSET_DIR := "res://assets/downloaded"

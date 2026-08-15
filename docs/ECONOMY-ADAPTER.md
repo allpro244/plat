@@ -71,7 +71,7 @@ camera — form, all of it.
    centerlines / parks / ponds drawn, dusk windows lighting by district. The
    development dial is proven through the adapter (landing vs metropolis of
    the same seed, committed renders). Imported cities are playable
-   (`godot --path . -- --city=…`) under the same banded rig. `CityPlan`
+(`godot --path . -- --city=…`) under the free-flow camera. `CityPlan`
    remains the generator for `--seed=` runs with no city file.
 4. **Live loop (next).** The exporter's static file becomes a message: the
    running sim streams parcel-state deltas (occupancy, condition, construction)

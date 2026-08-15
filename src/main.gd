@@ -1,48 +1,47 @@
 extends Node3D
 ## Interactive entry point — the playable viewer.
 ##
-## The camera contract is not relaxed for interactive use: this drives the
-## same CameraRig the headless shots use, so every orbit, zoom and band
-## change is clamped by data/camera_bands.json. There is no free-fly, by
-## construction (CLAUDE.md: the contract is load-bearing).
+## Camera is free-flow (owner override, 2026-08). The height-band clamp is
+## gone. Map mode is the Broadway-and-Wall / MapLibre scheme; V toggles a
+## WASD free-fly that can go anywhere. Street-level fidelity is not a goal.
 ##
-## Controls
-## Movement is the Broadway-and-Wall map scheme (it was a MapLibre map):
-##   left-drag ....... grab the ground and PAN — the city slides with you
-##   right-drag ...... rotate (x) and tilt via height (y)
-##   wheel ........... zoom toward the city (clamped to the band)
-##   arrows .......... pan, like a map's keyboard controls
-##   1 2 3 ........... near / mid / far band     C ....... re-centre downtown
-##   T / G ........... time of day               N ....... new city
+## Controls (map mode — MapLibre defaults)
+##   left-drag ........... grab the ground and PAN
+##   right-drag .......... rotate bearing (x) and tilt pitch (y)
+##   ctrl+left-drag ...... same as right-drag
+##   wheel ............... zoom toward the cursor
+##   double-click ........ zoom in toward the click
+##   arrows .............. pan
+##   shift+arrows ........ rotate / tilt
+##   compass (bottom-right) reset bearing to north; +/− zoom
+##   1 2 3 ............... optional near / mid / far presets (not a clamp)
+##   V ................... free-fly (WASD + RMB look + Q/E vertical)
+##   C ................... re-centre downtown
+##   T / G ............... time of day               N ....... new city
 ##   R rebuild   F preset views   H help   F12 screenshot   Esc quit
 ## Every move eases in (exponential approach), so it glides like easeTo
 ## instead of snapping — that glide was most of the old map's feel.
-##
-## Panning the TARGET is not free-fly: the camera still orbits that target
-## inside its height band — a helicopter, not a noclip camera. Every band
-## guarantee holds.
-##
-## Rebuilding a city is ~1-3 s of single-threaded generation, so the HUD
-## says so and the frame is yielded before the work starts — otherwise the
-## window looks hung.
 
 const ROTATE_SENSITIVITY := 0.32   # deg per pixel, right-drag x
-const TILT_SENSITIVITY := 0.9      # metres of height per pixel, right-drag y
-const WHEEL_STEP := 0.1            # fraction of current radius per notch
-const KEY_PAN := 0.5               # multiples of radius per second, arrows
+const PITCH_SENSITIVITY := 0.22    # deg per pixel, right-drag y (MapLibre tilt)
+const WHEEL_STEP := 0.12           # fraction of current distance per notch
+const KEY_PAN := 0.5               # multiples of viewport per second, arrows
+const KEY_TURN := 70.0             # deg/s, shift+arrows
+const KEY_TILT := 40.0             # deg/s, shift+up/down
+const FLY_LOOK := 0.12             # deg per pixel in free-fly
 ## Exponential approach rate for the easeTo glide. ~8/s reaches 92% of a
 ## move in 300 ms — the pace of the old map's default ease.
 const EASE := 8.0
 
 var city: CityScene
 var seed_value := 1928
-var az := 225.0
-var height := 120.0
-var radius := 215.0
-var band := "near"
+var bearing := 225.0
+var pitch := 60.8
+var distance := 246.0
 var time_of_day := 15.5
 var _hud: Label
 var _card: Label
+var _compass: Button
 var _press_pos := Vector2.ZERO   # to tell a click from a drag
 var _selected: Dictionary = {}   # the building on the card
 var _listing_pick := -1          # TAB cycles the for-sale tape
@@ -50,15 +49,16 @@ var _help_visible := true
 var _busy := false
 var _panning := false
 var _rotating := false
+var _grab: Variant = null        # ground point under cursor at pan-press
 var _fps_accum := 0.0
 var _fps_frames := 0
 var _fps := 0.0
 var _selftest := false
 var _target := Vector2.ZERO      # orbit centre, world XZ (eased, applied)
 # Goal state: inputs write here; _process eases the applied state toward it.
-var _g_az := 225.0
-var _g_height := 120.0
-var _g_radius := 215.0
+var _g_bearing := 225.0
+var _g_pitch := 60.8
+var _g_distance := 246.0
 var _g_target := Vector2.ZERO
 
 ## Engine cities shipped inside the build: each is a whole island the
@@ -100,6 +100,11 @@ func _ready() -> void:
 			_campaign_dir = a.substr(11).rstrip("/")
 			_city_file = _campaign_dir + "/city.json"
 			_load_game_hud()
+	# Acceptance: `godot -- --selftest` must exercise the deal loop, not
+	# just the viewer. Found a firm on seed 1928 when the caller did not
+	# already pass --campaign=.
+	if _selftest and _campaign_dir == "":
+		_bootstrap_selftest_campaign()
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_hud = Label.new()
@@ -121,9 +126,41 @@ func _ready() -> void:
 	_card.position = Vector2(get_viewport().get_visible_rect().size.x - 420, 12)
 	_card.visible = false
 	layer.add_child(_card)
+	_build_nav_widget(layer)
 	_hud.text = "generating city..."
 	await get_tree().process_frame
 	_rebuild()
+
+## MapLibre NavigationControl analogue: compass resets bearing; +/− zoom.
+func _build_nav_widget(layer: CanvasLayer) -> void:
+	var box := VBoxContainer.new()
+	var vp := get_viewport().get_visible_rect().size
+	box.position = Vector2(vp.x - 88, vp.y - 168)
+	box.add_theme_constant_override("separation", 4)
+	layer.add_child(box)
+	_compass = Button.new()
+	_compass.text = "N"
+	_compass.tooltip_text = "Reset bearing to north"
+	_compass.custom_minimum_size = Vector2(72, 48)
+	_compass.pressed.connect(_reset_bearing)
+	box.add_child(_compass)
+	var zoom_in := Button.new()
+	zoom_in.text = "+"
+	zoom_in.tooltip_text = "Zoom in"
+	zoom_in.custom_minimum_size = Vector2(72, 32)
+	zoom_in.pressed.connect(func() -> void: _g_distance *= (1.0 - WHEEL_STEP * 2.0))
+	box.add_child(zoom_in)
+	var zoom_out := Button.new()
+	zoom_out.text = "−"
+	zoom_out.tooltip_text = "Zoom out"
+	zoom_out.custom_minimum_size = Vector2(72, 32)
+	zoom_out.pressed.connect(func() -> void: _g_distance *= (1.0 + WHEEL_STEP * 2.0))
+	box.add_child(zoom_out)
+
+func _reset_bearing() -> void:
+	_g_bearing = 0.0
+	if city and city.rig and city.rig.is_fly():
+		city.rig.exit_fly()
 
 func _rebuild() -> void:
 	_busy = true
@@ -145,33 +182,52 @@ func _rebuild() -> void:
 		params["city"] = _city_file
 	city = CityScene.new(params)
 	add_child(city)
-	city.rig.set_band(band)
 	_snap()
 	print("[plat] built seed %d in %d ms" % [seed_value, Time.get_ticks_msec() - t0])
 	_busy = false
 	if _selftest:
 		await _run_selftest()
 
-## Headless proof that the interactive path works: exercise every control,
-## save a frame, quit. This is how an interactive scene gets the same
-## "verified by render" treatment as the still pipeline.
+## Headless proof that the interactive path works: exercise the free-flow
+## camera, the parcel card, a campaign advance and a buy, save frames, quit.
 func _run_selftest() -> void:
 	# One run only: the campaign-advance step below rebuilds the city, and a
 	# rebuild re-entering the selftest would loop forever.
 	_selftest = false
-	for step in [["pan", func() -> void: _pan_pixels(-400.0, 300.0)],
-			["recentre", func() -> void: _g_target = city._plan.core_center \
-					if city._plan != null else Vector2.ZERO],
-			["orbit", func() -> void: _orbit(45.0)],
-			["dolly", func() -> void: _dolly(30.0)],
-			["height", func() -> void: _height(25.0)],
-			["band mid", func() -> void: _set_band("mid")],
-			["band far", func() -> void: _set_band("far")],
-			["band near", func() -> void: _set_band("near")]]:
-		(step[1] as Callable).call()
-		_snap()
+	# Camera proof: two framings the old band clamp would have rejected.
+	# Street — closer than the old near floor (70 m / 130 m).
+	_g_bearing = 200.0
+	_g_pitch = 72.0
+	_g_distance = 48.0
+	_snap()
+	for i in range(8):
 		await get_tree().process_frame
-		print("[plat] selftest %s -> %s" % [step[0], city.rig.describe()])
+	print("[plat] selftest camera street -> %s" % city.rig.describe())
+	await _save_frame("renders/camera_street.png")
+	# Aerial — past the old far ceiling (1200 m / 2600 m).
+	_g_bearing = 40.0
+	_g_pitch = 36.0
+	_g_distance = 4200.0
+	_snap()
+	for i in range(8):
+		await get_tree().process_frame
+	print("[plat] selftest camera aerial -> %s" % city.rig.describe())
+	await _save_frame("renders/camera_aerial.png")
+	# Free-fly: leave the orbit, move, come back. Prints the fly pose.
+	city.rig.enter_fly()
+	city.rig.fly_input(Vector3(0.4, 0.3, -1.0), 180.0)
+	print("[plat] selftest camera fly -> %s" % city.rig.describe())
+	city.rig.exit_fly()
+	# Back to a playable downtown framing for the card / deal loop.
+	_g_bearing = 225.0
+	_g_pitch = 58.0
+	_g_distance = 280.0
+	_g_target = Vector2.ZERO
+	if city._import != null:
+		_g_target = city._import.core
+	_snap()
+	await get_tree().process_frame
+	print("[plat] selftest map -> %s" % city.rig.describe())
 	if city._import != null and not city._import.buildings.is_empty():
 		# Prove the parcel card: pick a real building through the camera.
 		var cam := get_viewport().get_camera_3d()
@@ -192,15 +248,16 @@ func _run_selftest() -> void:
 	if _campaign_dir != "":
 		# The game loop itself, once: sim advances in node, city rebuilds.
 		var before := str(_hud_game.get("date", "?"))
+		var cash_a := float(_hud_game.get("cash", 0))
 		await _advance_campaign(3)
 		while _busy:
 			await get_tree().process_frame
-		print("[plat] selftest campaign advance: %s -> %s" % [
-				before, str(_hud_game.get("date", "?"))])
-		# And a DEAL: walk the tape, buy the first listing, prove the money
-		# moved and the deed came back marked.
+		print("[plat] selftest campaign advance: %s $%.2fM -> %s $%.2fM" % [
+				before, cash_a / 1e6,
+				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6])
+		# And a DEAL: buy the cheapest listed lot cash covers.
 		var cash0 := float(_hud_game.get("cash", 0))
-		_cycle_listing()
+		_pick_affordable_listing()
 		if not _selected.is_empty():
 			await _buy_selected()
 			while _busy:
@@ -208,64 +265,140 @@ func _run_selftest() -> void:
 			print("[plat] selftest buy: cash $%.2fM -> $%.2fM, holdings %d" % [
 					cash0 / 1e6, float(_hud_game.get("cash", 0)) / 1e6,
 					int(_hud_game.get("holdings", 0))])
+		else:
+			printerr("[plat] selftest buy FAILED: no affordable listing")
+	else:
+		printerr("[plat] selftest campaign SKIPPED: no runner / campaign dir")
 	for i in range(20):
 		await get_tree().process_frame
-	await RenderingServer.frame_post_draw
-	var img := get_viewport().get_texture().get_image()
-	var out := ProjectSettings.globalize_path("res://renders/playable_selftest.png")
-	DirAccess.make_dir_recursive_absolute(out.get_base_dir())
-	img.save_png(out)
-	print("[plat] selftest OK -> ", out)
+	await _save_frame("renders/playable_selftest.png")
+	print("[plat] selftest OK -> ", ProjectSettings.globalize_path(
+			"res://renders/playable_selftest.png"))
 	get_tree().quit(0)
 
-# --- camera moves, all through the clamping rig --------------------------
+func _save_frame(rel: String) -> void:
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var out := ProjectSettings.globalize_path("res://" + rel)
+	DirAccess.make_dir_recursive_absolute(out.get_base_dir())
+	img.save_png(out)
+	print("[plat] frame -> ", out)
+
+func _bootstrap_selftest_campaign() -> void:
+	var runner := _resolve_runner()
+	if runner == "":
+		printerr("[plat] selftest: no simulation runner at ",
+				"/workspace/plat-econ/tools/game-server.mjs")
+		return
+	var dir := ProjectSettings.globalize_path("user://campaigns/selftest")
+	var out := []
+	var code := OS.execute("node", [runner, "new", "--dir=" + dir,
+			"--seed=1928"], out, true)
+	print("[plat] selftest campaign new: code=%d %s" % [code, "".join(out).right(400)])
+	if code != 0:
+		return
+	_campaign_dir = dir
+	_city_file = dir + "/city.json"
+	_engine_pick = -1
+	_load_game_hud()
+
+# --- camera moves --------------------------------------------------------
 # Inputs write GOALS; _process eases the applied state toward them, which
-# is what turns every move into a glide.
+# is what turns every move into a glide. Nothing here writes a band clamp.
 
 func _orbit(d: float) -> void:
-	_g_az += d
+	_g_bearing += d
 
-func _dolly(d: float) -> void:
-	_g_radius += d
+func _tilt(d: float) -> void:
+	_g_pitch = clampf(_g_pitch + d, CameraRig.MIN_PITCH, CameraRig.MAX_PITCH)
 
-func _height(d: float) -> void:
-	_g_height += d
+func _dolly_frac(frac: float) -> void:
+	_g_distance = clampf(_g_distance * (1.0 + frac),
+			CameraRig.MIN_DISTANCE, CameraRig.MAX_DISTANCE)
 
-func _set_band(b: String) -> void:
-	band = b
-	city.rig.set_band(b)
-	_push()
+func _apply_preset(name: String) -> void:
+	if city and city.rig:
+		city.rig.apply_preset(name)
+		# Pull the preset into goals so ease / HUD stay in sync — still not
+		# a lock; the next wheel notch leaves it.
+		_g_bearing = city.rig.bearing()
+		_g_pitch = city.rig.pitch()
+		_g_distance = city.rig.distance()
+		_snap()
 
 ## Snap applied state to goals instantly (rebuilds, selftest determinism).
 func _snap() -> void:
-	az = _g_az
-	height = _g_height
-	radius = _g_radius
+	bearing = _g_bearing
+	pitch = _g_pitch
+	distance = _g_distance
 	_target = _g_target
 	_push()
 
 func _push() -> void:
 	if city and city.rig:
+		if city.rig.is_fly():
+			return
 		city.rig.set_target_xz(_target.x, _target.y)
-		city.rig.set_view(az, height, radius)
+		city.rig.set_orbit(bearing, pitch, distance)
 
-## Grab-the-ground pan: a drag of (dx, dy) screen pixels slides the city so
-## the ground tracks the cursor. Metres-per-pixel comes from the current
-## radius and the camera's vertical FOV over the viewport height.
+func _ground_under(screen: Vector2) -> Variant:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return null
+	var from := cam.project_ray_origin(screen)
+	var dir := cam.project_ray_normal(screen)
+	if absf(dir.y) < 1e-5:
+		return null
+	var t := -from.y / dir.y
+	if t < 0.0:
+		return null
+	return from + dir * t
+
+## Grab-the-ground pan: the world point under the cursor stays under it.
+func _pan_grab(screen: Vector2) -> void:
+	var now: Variant = _ground_under(screen)
+	if _grab == null or now == null:
+		return
+	var g: Vector3 = _grab
+	var p: Vector3 = now
+	var d := Vector2(g.x - p.x, g.z - p.z)
+	_g_target += d
+	_target += d
+	_push()
+
+## Keyboard / approximate pan (eased). Metres-per-pixel from current
+## distance and the camera's vertical FOV over the viewport height.
 func _pan_pixels(dx: float, dy: float) -> void:
 	var vp_h := float(get_viewport().get_visible_rect().size.y)
-	var mpp := 2.0 * radius * tan(deg_to_rad(37.5)) / maxf(vp_h, 1.0)
-	var a := deg_to_rad(az)
-	var fwd := Vector2(-sin(a), cos(a))     # inward, toward the target
+	var mpp := 2.0 * distance * tan(deg_to_rad(37.5)) / maxf(vp_h, 1.0)
+	var a := deg_to_rad(bearing)
+	var fwd := Vector2(-sin(a), cos(a))
 	var right := Vector2(cos(a), sin(a))
 	_g_target += (right * -dx + fwd * dy) * mpp
-	var limit := 2600.0
-	if city and city._plan != null:
-		limit = city._plan.city_limit(atan2(_g_target.y, _g_target.x)) + 400.0
-	elif city and city._import != null:
-		limit = city._import.radius_max + 400.0
-	if _g_target.length() > limit:
-		_g_target = _g_target.normalized() * limit
+
+## Zoom so the ground under `screen` stays under the cursor (MapLibre).
+func _zoom_toward(screen: Vector2, factor: float) -> void:
+	var g: Variant = _ground_under(screen)
+	var old := _g_distance
+	_g_distance = clampf(_g_distance * factor, CameraRig.MIN_DISTANCE, CameraRig.MAX_DISTANCE)
+	if g != null and old > 0.1:
+		var gp := Vector2((g as Vector3).x, (g as Vector3).z)
+		var k := _g_distance / old
+		_g_target = gp + (_g_target - gp) * k
+
+func _toggle_fly() -> void:
+	if city == null or city.rig == null:
+		return
+	if city.rig.is_fly():
+		city.rig.exit_fly()
+		_g_bearing = city.rig.bearing()
+		_g_pitch = city.rig.pitch()
+		_g_distance = city.rig.distance()
+		_g_target = city.rig.target_xz()
+		_snap()
+	else:
+		_push()
+		city.rig.enter_fly()
 
 func _process(delta: float) -> void:
 	_fps_accum += delta
@@ -276,33 +409,60 @@ func _process(delta: float) -> void:
 		_fps_frames = 0
 	if _busy:
 		return
-	# Arrow keys pan, like a map's keyboard controls.
+	if city and city.rig and city.rig.is_fly():
+		_fly_process(delta)
+		_update_hud()
+		return
+	var shift := Input.is_key_pressed(KEY_SHIFT)
 	var vp := get_viewport().get_visible_rect().size
-	var px := KEY_PAN * vp.y * delta
-	if Input.is_key_pressed(KEY_LEFT):
-		_pan_pixels(-px, 0.0)
-	if Input.is_key_pressed(KEY_RIGHT):
-		_pan_pixels(px, 0.0)
-	if Input.is_key_pressed(KEY_UP):
-		_pan_pixels(0.0, -px)
-	if Input.is_key_pressed(KEY_DOWN):
-		_pan_pixels(0.0, px)
-	if Input.is_key_pressed(KEY_PAGEUP):
-		_height(90.0 * delta)
-	if Input.is_key_pressed(KEY_PAGEDOWN):
-		_height(-90.0 * delta)
+	if shift:
+		if Input.is_key_pressed(KEY_LEFT):
+			_orbit(-KEY_TURN * delta)
+		if Input.is_key_pressed(KEY_RIGHT):
+			_orbit(KEY_TURN * delta)
+		if Input.is_key_pressed(KEY_UP):
+			_tilt(KEY_TILT * delta)
+		if Input.is_key_pressed(KEY_DOWN):
+			_tilt(-KEY_TILT * delta)
+	else:
+		var px := KEY_PAN * vp.y * delta
+		if Input.is_key_pressed(KEY_LEFT):
+			_pan_pixels(-px, 0.0)
+		if Input.is_key_pressed(KEY_RIGHT):
+			_pan_pixels(px, 0.0)
+		if Input.is_key_pressed(KEY_UP):
+			_pan_pixels(0.0, -px)
+		if Input.is_key_pressed(KEY_DOWN):
+			_pan_pixels(0.0, px)
 	# The easeTo glide: applied state approaches the goal exponentially.
 	var t := 1.0 - exp(-EASE * delta)
-	az = lerpf(az, _g_az, t)
-	height = lerpf(height, _g_height, t)
-	radius = lerpf(radius, _g_radius, t)
+	bearing = rad_to_deg(lerp_angle(deg_to_rad(bearing), deg_to_rad(_g_bearing), t))
+	pitch = lerpf(pitch, _g_pitch, t)
+	distance = lerpf(distance, _g_distance, t)
 	_target = _target.lerp(_g_target, t)
+	_g_pitch = clampf(_g_pitch, CameraRig.MIN_PITCH, CameraRig.MAX_PITCH)
+	_g_distance = clampf(_g_distance, CameraRig.MIN_DISTANCE, CameraRig.MAX_DISTANCE)
 	_push()
-	# The rig clamped what we pushed; pull the clamp back into the goals so
-	# they cannot run away past a band edge while the user keeps dragging.
-	_g_height = clampf(_g_height, height - 200.0, height + 200.0)
-	_g_radius = clampf(_g_radius, radius - 400.0, radius + 400.0)
 	_update_hud()
+
+func _fly_process(delta: float) -> void:
+	var sprint := 2.8 if Input.is_key_pressed(KEY_SHIFT) else 1.0
+	var speed := 90.0 * sprint
+	var v := Vector3.ZERO
+	if Input.is_key_pressed(KEY_W):
+		v.z -= 1.0
+	if Input.is_key_pressed(KEY_S):
+		v.z += 1.0
+	if Input.is_key_pressed(KEY_A):
+		v.x -= 1.0
+	if Input.is_key_pressed(KEY_D):
+		v.x += 1.0
+	if Input.is_key_pressed(KEY_Q) or Input.is_key_pressed(KEY_PAGEUP):
+		v.y += 1.0
+	if Input.is_key_pressed(KEY_E) or Input.is_key_pressed(KEY_PAGEDOWN):
+		v.y -= 1.0
+	if v != Vector3.ZERO:
+		city.rig.fly_input(v.normalized(), speed * delta)
 
 func _load_game_hud() -> void:
 	var txt := FileAccess.get_file_as_string(_campaign_dir + "/hud.json")
@@ -503,6 +663,29 @@ func _cycle_listing() -> void:
 	_g_target = c
 	_show_card(b)
 
+## Cheapest listed lot the firm can actually pay for — the selftest deal.
+func _pick_affordable_listing() -> void:
+	if city == null or city._import == null:
+		return
+	var cash := float(_hud_game.get("cash", 0))
+	var best: Dictionary = {}
+	var best_ask := 1e18
+	for b in city._import.buildings:
+		if not b.get("listed", false) or b.get("held", false) or b.get("deco", false):
+			continue
+		var ask := float(b.get("ask", 0.0))
+		if ask > 0.0 and ask <= cash and ask < best_ask:
+			best = b
+			best_ask = ask
+	if best.is_empty():
+		_selected = {}
+		return
+	var c := (best["bbox"] as Rect2).get_center()
+	_g_target = c
+	_target = c
+	_push()
+	_show_card(best)
+
 func _update_hud() -> void:
 	if city == null or city.rig == null:
 		return
@@ -518,10 +701,10 @@ func _update_hud() -> void:
 			help = "\n\nSPACE advance a season   B buy selected   TAB for-sale tape   M owners overlay"
 		if _campaign_dir == "":
 			help = "\n\nF1 BREAK GROUND — found a firm on a fresh island"
-		help += ("\n\ndrag/arrows orbit   wheel/up-down dolly   PgUp/PgDn height"
-				+ "\nleft-drag pan   right-drag rotate/tilt   wheel zoom"
-				+ "\narrows pan   PgUp/PgDn height   C re-centre downtown"
-				+ "\n1 2 3 band   T/G time   N new city   E engine city   F preset view"
+		help += ("\n\nleft-drag pan   right-drag / ctrl+left rotate+tilt   wheel zoom-at-cursor"
+				+ "\narrows pan   shift+arrows rotate/tilt   double-click zoom   compass = north"
+				+ "\nV free-fly (WASD + RMB look + Q/E up-down)   C downtown   1/2/3 presets"
+				+ "\nT/G time   N new city   E engine city   F preset view"
 				+ "\nH help   F12 screenshot   Esc quit")
 	var game_line := ""
 	if not _hud_game.is_empty():
@@ -537,6 +720,9 @@ func _update_hud() -> void:
 	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s%s" % [
 			_fps, city.rig.describe(), _target.x, _target.y, int(time_of_day),
 			int(fposmod(time_of_day, 1.0) * 60.0), game_line, plan_line, help]
+	if _compass:
+		var br := city.rig.bearing()
+		_compass.text = "N\n%03d°" % int(fposmod(br, 360.0))
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _busy:
@@ -544,31 +730,49 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.double_click and mb.pressed:
+				_zoom_toward(mb.position, 0.5)
+				return
 			if mb.pressed:
 				_press_pos = mb.position
-			elif _press_pos.distance_to(mb.position) < 6.0:
-				# A press that never moved is a CLICK: pick the parcel.
-				_pick_building(mb.position)
-			_panning = mb.pressed
+				if mb.ctrl_pressed:
+					_rotating = true
+					_panning = false
+					_grab = null
+				else:
+					_panning = true
+					_rotating = false
+					_grab = _ground_under(mb.position)
+			else:
+				if _press_pos.distance_to(mb.position) < 6.0:
+					# A press that never moved is a CLICK: pick the parcel.
+					_pick_building(mb.position)
+				_panning = false
+				_rotating = false
+				_grab = null
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			_rotating = mb.pressed
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_dolly(-_g_radius * WHEEL_STEP)
+			_zoom_toward(mb.position, 1.0 - WHEEL_STEP)
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_dolly(_g_radius * WHEEL_STEP)
+			_zoom_toward(mb.position, 1.0 + WHEEL_STEP)
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if _panning:
-			_pan_pixels(mm.relative.x, mm.relative.y)
-		elif _rotating:
+		if city and city.rig and city.rig.is_fly() and _rotating:
+			city.rig.fly_look(mm.relative.x * FLY_LOOK, mm.relative.y * FLY_LOOK)
+		elif _panning and not mm.ctrl_pressed:
+			_pan_grab(mm.position)
+		elif _rotating or (_panning and mm.ctrl_pressed):
 			_orbit(mm.relative.x * ROTATE_SENSITIVITY)
-			_height(-mm.relative.y * TILT_SENSITIVITY)
+			_tilt(-mm.relative.y * PITCH_SENSITIVITY)
 	elif event is InputEventKey and (event as InputEventKey).pressed \
 			and not (event as InputEventKey).echo:
 		match (event as InputEventKey).keycode:
-			KEY_1: _set_band("near")
-			KEY_2: _set_band("mid")
-			KEY_3: _set_band("far")
+			KEY_1: _apply_preset("near")
+			KEY_2: _apply_preset("mid")
+			KEY_3: _apply_preset("far")
+			KEY_V:
+				_toggle_fly()
 			KEY_T:
 				time_of_day = clampf(time_of_day + 0.5, 4.0, 22.0)
 				_rebuild()
@@ -591,6 +795,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_g_target = Vector2.ZERO
 				if city and city._plan != null:
 					_g_target = city._plan.core_center
+				elif city and city._import != null:
+					_g_target = city._import.core
 			KEY_F:
 				_cycle_preset()
 			KEY_H:
@@ -598,6 +804,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F12:
 				_screenshot()
 			KEY_E:
+				if city and city.rig and city.rig.is_fly():
+					return
 				# Cycle the ENGINE cities shipped with the build: islands
 				# the economy generated, with its parcels, classes, years
 				# and occupancy. N stays plat's own generator.
@@ -626,30 +834,25 @@ func _unhandled_input(event: InputEvent) -> void:
 
 var _preset := 0
 
-## Three framings worth looking at, one per band — the same views the
-## reference renders use.
+## Three optional framings — the old band midpoints, now just views.
 func _cycle_preset() -> void:
 	_preset = (_preset + 1) % 3
 	match _preset:
 		0:
-			band = "near"
-			_g_az = 200.0
-			_g_height = 140.0
-			_g_radius = 240.0
+			_g_bearing = 200.0
+			_g_pitch = 60.0
+			_g_distance = 246.0
 		1:
-			band = "mid"
-			_g_az = 100.0
-			_g_height = 420.0
-			_g_radius = 880.0
+			_g_bearing = 100.0
+			_g_pitch = 64.0
+			_g_distance = 975.0
 		2:
-			band = "far"
-			_g_az = 20.0
-			_g_height = 1150.0
-			_g_radius = 1900.0
-	city.rig.set_band(band)
+			_g_bearing = 20.0
+			_g_pitch = 59.0
+			_g_distance = 2220.0
 
 func _screenshot() -> void:
 	var img := get_viewport().get_texture().get_image()
-	var path := "user://plat_%d_%s.png" % [seed_value, city.rig.band_name()]
+	var path := "user://plat_%d.png" % seed_value
 	img.save_png(ProjectSettings.globalize_path(path))
 	print("[plat] screenshot -> ", ProjectSettings.globalize_path(path))

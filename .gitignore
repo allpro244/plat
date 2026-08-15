@@ -14,6 +14,10 @@ export_presets.cfg
 !/renders/reference/*.png
 !/renders/ci/*.png
 
+# Local checkout of the economy engine (dev path main.gd expects).
+# Public repo; clone it beside plat, do not commit it here.
+/plat-econ/
+
 # Node (web build tooling)
 node_modules/
 dist/

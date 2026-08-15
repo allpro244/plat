@@ -10,8 +10,8 @@ binding.
 One seeded city block of ~35 procedurally generated buildings spanning three
 zoning eras — pre-1916 lot-line lofts, 1916 setback towers stepped inside the
 sky-exposure plane, and a 1961 tower-in-plaza — on the same street, under a
-real computed sun, shot by an orbital camera that cannot leave its height
-bands.
+real computed sun, shot by a free-flow camera (continuous pitch and zoom;
+optional near/mid/far presets).
 
 ![reference render](renders/reference/block_1928_evening.png)
 
@@ -37,12 +37,15 @@ want headless renders on a machine without a GPU.
 | input | does |
 |---|---|
 | left-drag | grab the ground and pan — the city slides with the cursor |
-| right-drag | rotate (x) and tilt (y) |
-| wheel | zoom (clamped to the band) |
-| arrows | pan (map-style keyboard controls) |
-| PgUp / PgDn | height |
+| right-drag or ctrl+left-drag | rotate bearing (x) and tilt pitch (y) |
+| wheel | zoom toward the cursor |
+| double-click | zoom in toward the click |
+| arrows | pan |
+| shift+arrows | rotate / tilt |
+| compass (bottom-right) | reset bearing to north; +/− zoom |
+| `V` | free-fly: WASD + RMB look + Q/E (or PgUp/PgDn) vertical |
 | `C` | re-centre on downtown |
-| `1` `2` `3` | near / mid / far camera band |
+| `1` `2` `3` | optional near / mid / far presets (not a clamp) |
 | `T` / `G` | time of day (rebuilds; sun and lit windows follow) |
 | `N` | **new city** — fresh random seed, whole island regenerates |
 | `F` | cycle the three preset framings |
@@ -53,9 +56,9 @@ family, height mode, era bias, island/islet count, district mix — so a city
 you like can be reproduced exactly from its seed. Generating a city is
 1–3 seconds of single-threaded work; the HUD says so while it runs.
 
-The camera is deliberately **orbital and band-clamped**, in play exactly as in
-the headless shots: no free-fly. That contract is what makes interiors,
-facade LOD, and baked ground relationships tractable (see `CLAUDE.md`).
+The camera is **free-flow** (owner override): continuous pitch and zoom, no
+height-band clamp, plus a WASD free-fly. Street-level fidelity is not a goal.
+`data/camera_bands.json` remains only as optional presets. See `CLAUDE.md`.
 
 ## The economy
 
@@ -96,8 +99,8 @@ azimuth/elevation, camera band/position) so any image is reproducible.
 
 | path | what |
 |---|---|
-| `data/camera_bands.json` | THE camera contract as data: orbital bands (height/radius) |
-| `src/camera_rig.gd` | orbital rig; clamps every write into the active band |
+| `data/camera_bands.json` | optional near/mid/far framing presets (not a clamp) |
+| `src/camera_rig.gd` | free-flow rig: map orbit (bearing/pitch/distance) + fly mode |
 | `src/sun_position.gd` | solar ephemeris (NOAA low-precision) — date+time+place → az/el |
 | `src/city/block_gen.gd` | seeded lot subdivision + era assignment (quantities) |
 | `src/city/grammar.gd` | era shape rules: lot → massing + facade params (form) |
