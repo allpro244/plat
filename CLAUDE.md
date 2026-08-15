@@ -20,24 +20,27 @@ hours stale — and the obvious control confirmed the wrong conclusion, because
 both sides of it loaded the same stale bundle. Assume your instrument is lying
 until you have made it prove otherwise.
 
-# THE CAMERA CONTRACT IS LOAD-BEARING
+# THE CAMERA IS FREE-FLOW (OWNER OVERRIDE, 2026-08)
 
-The camera is **orbital and constrained to defined height bands.** It is not a
-preference and it is not a placeholder. It is the single decision that every
-other decision in this repository derives from:
+The old "orbital, band-clamped, no free-fly" contract is **revoked**. The
+player can zoom, tilt, pan and fly anywhere. `camera_rig.gd` must not clamp
+writes into a height band. `data/camera_bands.json` is optional presets
+(1/2/3, F) only.
 
-- Interiors are never rendered, so buildings are shells.
-- Facade detail is authored for the closest band and impostored beyond it.
-- Ambient occlusion and contact shadows can be baked, because the relationship
-  between geometry and ground does not change per frame.
-- Street-level prop density can be an impression rather than an inventory.
-- Silhouette and roofscape matter more than doorways, because the closest band
-  still looks *down*.
+Map mode follows Broadway & Wall / MapLibre: left-drag pans the ground under
+the cursor; right-drag or ctrl+left-drag rotates bearing and tilts pitch;
+wheel zooms toward the cursor; arrows pan; shift+arrows rotate/tilt;
+double-click zooms; the compass widget resets bearing. `V` is free-fly
+(WASD + mouse-look + Q/E vertical).
 
-Every one of those is a large saving, and every one of them is void the moment
-somebody adds a free-fly camera "just for screenshots". If the contract ever
-needs to change, that is a design decision with a cost estimate attached, not a
-convenience. Write down what it would break before proposing it.
+Street-level visual fidelity is **not a goal**. Do not spend effort on
+close-range LOD, interiors, or street detail. The point is freedom of
+movement, not a pretty street view.
+
+What this costs, written down because the old contract bought it: interiors
+stay unrendered (still shells), facade LOD and baked ground AO are no longer
+justified by a guaranteed look-down, and street props stay an impression.
+Those savings are forfeited on purpose. Do not restore the band clamp.
 
 # THE SIM OWNS QUANTITIES. THE RENDERER OWNS FORM.
 

@@ -1,5 +1,5 @@
 {
-  "comment": "The camera contract, as data. Orbital rig only. Heights and radii in meters from block center at ground level. Pitch is derived from height/radius (the rig always looks at its target), so constraining those two constrains everything. The closest band still looks DOWN — see CLAUDE.md.",
+  "comment": "Optional framing presets (near / mid / far), not a clamp. The camera is free-flow: continuous pitch and distance, plus a WASD free-fly mode. 1/2/3 and F ease to these midpoints; nothing locks the rig into a band. Heights and radii in meters from the look-at target.",
   "target_height_m": 20.0,
   "bands": [
     {

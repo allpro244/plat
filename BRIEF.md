@@ -35,14 +35,15 @@ real massing rules, invest heavily in lighting and post, and the result reads
 as photoreal at the distances this camera actually sits at.
 
 **Expect roughly 80% of the impression from the air and considerably less at
-street level.** That gap is why the camera contract exists. Do not promise
-past it.
+street level.** The camera can now go to the street; that does not raise the
+fidelity target. Do not promise past it, and do not spend the milestone
+budget dressing a street view.
 
 ## Decisions already made
 
 | Decision | Why |
 |---|---|
-| **Orbital camera, constrained height bands** | The single biggest determinant of achievable fidelity per unit of work. Constraining it buys baked AO, impostors, shell-only buildings and no interiors. See `CLAUDE.md`. |
+| **Free-flow camera (owner override, 2026-08)** | Band clamp revoked. MapLibre / Broadway & Wall navigation plus a WASD free-fly. Street-level fidelity is not a goal; `camera_bands.json` is optional presets only. See `CLAUDE.md`. |
 | **Godot 4 as the client** | Free, MIT, no account, ~150 MB. Text-based scene files, so an agent authors them directly instead of clicking an editor. Headless-capable for CI renders. |
 | **Native build is the product. Forward+ renderer, Vulkan.** | Not a packaging preference — a renderer choice. See below. |
 | **Simulation as an engine-agnostic core** | Makes the renderer decision reversible. If Godot disappoints, the client is replaced and the economy never notices. |
@@ -129,8 +130,8 @@ subject. It is a vertical slice, not a demo.
 
 **Deliverables**
 
-1. **Camera rig.** Orbital, locked to the defined height bands, with the band
-   definitions written down as data rather than scattered through code.
+1. **Camera rig.** Free-flow (owner override): continuous pitch and zoom, no
+   band clamp. Optional near/mid/far presets live in `data/camera_bands.json`.
 2. **Procedural block generator.** One seeded city block, roughly forty
    buildings, generated from lot polygons by the shape grammar. Era-varied —
    at minimum a pre-1916 lot-line block, a 1916 setback tower and a 1961
@@ -148,7 +149,7 @@ subject. It is a vertical slice, not a demo.
 
 - A screenshot exists, and it was produced by the build rather than by hand.
 - The same seed and the same time of day produce the same image twice.
-- The camera cannot leave its height bands.
+- The camera can leave any former height band (street through aerial).
 - Nothing in the scene was hand-placed.
 
 **Explicitly not in milestone 1:** traffic, pedestrians, weather, seasons, the
@@ -172,9 +173,9 @@ economy, more than one block, any UI.
 
 Each of these has killed or damaged a real project.
 
-- **Free-fly street-level camera.** Voids every saving the camera contract
-  buys, spreads effort thin, and produces a game that looks *worse* because
-  nothing gets the attention it needed. If it is ever wanted, cost it first.
+- **Spending the art budget on street-level fidelity.** The camera can go
+  there now; that is not a brief to dress interiors, close-range LOD, or
+  doorway detail. The look target is still the air.
 - **The simulation dictating geometry.** The moment the sim owns shapes, the
   renderer cannot improve without economic regressions. Quantities in, form
   decided here.
