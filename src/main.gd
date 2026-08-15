@@ -39,13 +39,12 @@ var bearing := 225.0
 var pitch := 60.8
 var distance := 246.0
 var time_of_day := 15.5
-var _hud: Label
-var _card: Label
+var _ui: GameUi
 var _compass: Button
 var _press_pos := Vector2.ZERO   # to tell a click from a drag
 var _selected: Dictionary = {}   # the building on the card
 var _listing_pick := -1          # TAB cycles the for-sale tape
-var _help_visible := true
+var _help_visible := false
 var _busy := false
 var _panning := false
 var _rotating := false
@@ -107,27 +106,20 @@ func _ready() -> void:
 		_bootstrap_selftest_campaign()
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	_hud = Label.new()
-	_hud.position = Vector2(16, 12)
-	_hud.add_theme_color_override("font_color", Color(1, 1, 1))
-	_hud.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	_hud.add_theme_constant_override("outline_size", 6)
-	layer.add_child(_hud)
-	# The parcel card: what a clicked building IS, by the record — the same
-	# numbers the acquisition desk prices off.
-	_card = Label.new()
-	_card.add_theme_color_override("font_color", Color(1, 1, 1))
-	_card.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	_card.add_theme_constant_override("outline_size", 7)
-	_card.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	# Plain absolute placement: anchor presets make `position` an offset
-	# from the anchored edge, which put the first card 1,180 px past the
-	# right border — an invisible card, caught by the selftest frame.
-	_card.position = Vector2(get_viewport().get_visible_rect().size.x - 420, 12)
-	_card.visible = false
-	layer.add_child(_card)
+	_ui = GameUi.new()
+	layer.add_child(_ui)
+	_ui.advance_pressed.connect(func() -> void: _advance_campaign(3))
+	_ui.buy_pressed.connect(_buy_selected)
+	_ui.listings_pressed.connect(_cycle_listing)
+	_ui.break_ground_pressed.connect(_break_ground)
+	_ui.close_parcel_pressed.connect(func() -> void:
+		_selected = {}
+		_ui.hide_parcel())
+	_ui.owners_lens_pressed.connect(func(on: bool) -> void:
+		ContextGen.overlay = "owners" if on else ""
+		_rebuild())
 	_build_nav_widget(layer)
-	_hud.text = "generating city..."
+	_ui.set_status("generating city...")
 	await get_tree().process_frame
 	await _rebuild()
 	# Shipped zip with plat-econ beside the exe: start the game without F1.
@@ -149,18 +141,28 @@ func _build_nav_widget(layer: CanvasLayer) -> void:
 	_compass.text = "N"
 	_compass.tooltip_text = "Reset bearing to north"
 	_compass.custom_minimum_size = Vector2(72, 48)
+	_compass.add_theme_stylebox_override("normal", BwTheme.lens_btn())
+	_compass.add_theme_stylebox_override("hover", BwTheme.lens_btn())
+	_compass.add_theme_color_override("font_color", BwTheme.INK_DIM)
+	_compass.add_theme_font_override("font", BwTheme.sans())
 	_compass.pressed.connect(_reset_bearing)
 	box.add_child(_compass)
 	var zoom_in := Button.new()
 	zoom_in.text = "+"
 	zoom_in.tooltip_text = "Zoom in"
 	zoom_in.custom_minimum_size = Vector2(72, 32)
+	zoom_in.add_theme_stylebox_override("normal", BwTheme.lens_btn())
+	zoom_in.add_theme_stylebox_override("hover", BwTheme.lens_btn())
+	zoom_in.add_theme_color_override("font_color", BwTheme.INK_DIM)
 	zoom_in.pressed.connect(func() -> void: _g_distance *= (1.0 - WHEEL_STEP * 2.0))
 	box.add_child(zoom_in)
 	var zoom_out := Button.new()
 	zoom_out.text = "−"
 	zoom_out.tooltip_text = "Zoom out"
 	zoom_out.custom_minimum_size = Vector2(72, 32)
+	zoom_out.add_theme_stylebox_override("normal", BwTheme.lens_btn())
+	zoom_out.add_theme_stylebox_override("hover", BwTheme.lens_btn())
+	zoom_out.add_theme_color_override("font_color", BwTheme.INK_DIM)
 	zoom_out.pressed.connect(func() -> void: _g_distance *= (1.0 + WHEEL_STEP * 2.0))
 	box.add_child(zoom_out)
 
@@ -171,7 +173,7 @@ func _reset_bearing() -> void:
 
 func _rebuild() -> void:
 	_busy = true
-	_hud.text = "generating city (seed %d)..." % seed_value
+	_ui.set_status("generating city (seed %d)..." % seed_value)
 	# Let the HUD paint before the generation stalls the frame.
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -202,7 +204,7 @@ func _rebuild() -> void:
 				found = true
 				break
 		if not found:
-			_card.visible = false
+			_ui.hide_parcel()
 	_busy = false
 	if _selftest:
 		await _run_selftest()
@@ -262,10 +264,10 @@ func _run_selftest() -> void:
 			if cam.is_position_behind(world):
 				continue
 			_pick_building(cam.unproject_position(world))
-			if _card.visible:
-				print("[plat] selftest pick: ", _card.text.replace("\n", " | "))
+			if _ui.is_parcel_visible():
+				print("[plat] selftest pick: ", _ui.parcel_debug_text())
 				break
-		if not _card.visible:
+		if not _ui.is_parcel_visible():
 			printerr("[plat] selftest pick FAILED: no building card")
 	if _campaign_dir != "":
 		# The game loop itself, once: sim advances in node, city rebuilds.
@@ -282,7 +284,7 @@ func _run_selftest() -> void:
 		var cash0 := float(_hud_game.get("cash", 0))
 		_pick_affordable_listing()
 		if not _selected.is_empty():
-			print("[plat] selftest listing: ", _card.text.replace("\n", " | "))
+			print("[plat] selftest listing: ", _ui.parcel_debug_text())
 			ContextGen.overlay = "owners"
 			await _buy_selected()
 			while _busy:
@@ -290,14 +292,15 @@ func _run_selftest() -> void:
 			print("[plat] selftest buy: cash $%.2fM -> $%.2fM, holdings %d" % [
 					cash0 / 1e6, float(_hud_game.get("cash", 0)) / 1e6,
 					int(_hud_game.get("holdings", 0))])
-			if _card.visible:
-				print("[plat] selftest owned card: ", _card.text.replace("\n", " | "))
+			if _ui.is_parcel_visible():
+				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
 		printerr("[plat] selftest campaign SKIPPED: no runner / campaign dir")
 	for i in range(20):
 		await get_tree().process_frame
+	await _save_frame("renders/ui_proof.png")
 	await _save_frame("renders/playable_selftest.png")
 	print("[plat] selftest OK -> ", ProjectSettings.globalize_path(
 			"res://renders/playable_selftest.png"))
@@ -505,7 +508,7 @@ func _advance_campaign(months: int) -> void:
 	if _busy or _campaign_dir == "":
 		return
 	_busy = true
-	_hud.text = "advancing %d months (simulation runs in node)..." % months
+	_ui.set_status("advancing %d months (simulation runs in node)..." % months)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var meta: Variant = JSON.parse_string(
@@ -520,7 +523,7 @@ func _advance_campaign(months: int) -> void:
 	out = ran[1]
 	_busy = false
 	if code != 0 or runner == "":
-		_hud.text = "advance FAILED (%d): %s" % [code, "".join(out).right(200)]
+		_ui.set_status("advance FAILED (%d): %s" % [code, "".join(out).right(200)])
 		return
 	_load_game_hud()
 	_rebuild()
@@ -532,7 +535,7 @@ func _advance_campaign(months: int) -> void:
 ## per click is nothing.
 func _pick_building(screen: Vector2) -> void:
 	if city == null or city._import == null:
-		_card.visible = false
+		_ui.hide_parcel()
 		return
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
@@ -566,44 +569,14 @@ func _pick_building(screen: Vector2) -> void:
 			best_t = t
 			best = b
 	if best.is_empty():
-		_card.visible = false
+		_ui.hide_parcel()
 		return
 	_show_card(best)
 
 func _show_card(b: Dictionary) -> void:
 	_selected = b
-	var par: Dictionary = b
-	var occ_line := "—"
-	if float(par.get("occ", -1.0)) >= 0.0:
-		occ_line = "%.0f%% occupied" % (float(par["occ"]) * 100.0)
-	var lines := [
-		"BBL %s%s" % [str(par.get("bbl", "?")), "   ★ YOURS" if par.get("held", false) else ""],
-		"%s · %s" % [str(par.get("cls", "?")).to_upper(), str(par.get("district", "?"))],
-		"%s sf building · %s sf lot" % [_fmt_sf(float(par.get("sqft", 0.0))),
-				_fmt_sf(float(par.get("lot_sqft", 0.0)))],
-		"%d floors · built %d" % [int(par.get("floors", 0)), int(par.get("year", 0))],
-		occ_line,
-	]
-	# The money lines: the record becomes an investment memo.
-	if float(par.get("value", -1.0)) > 0.0:
-		lines.append("appraised $%.2fM" % (float(par["value"]) / 1e6))
-	if par.get("listed", false):
-		lines.append("FOR SALE — ask $%.2fM%s" % [float(par.get("ask", 0.0)) / 1e6,
-				"  (DISTRESS)" if par.get("distress", false) else ""])
-		if _campaign_dir != "" and not par.get("held", false):
-			lines.append("[B] buy at ask")
-	elif float(par.get("ask", -1.0)) > 0.0:
-		lines.append("off-market ask $%.2fM" % (float(par["ask"]) / 1e6))
-	_card.text = "\n".join(lines)
-	_card.visible = true
+	_ui.show_parcel(b, _campaign_dir != "")
 
-static func _fmt_sf(v: float) -> String:
-	var s := str(int(roundf(v)))
-	var out := ""
-	while s.length() > 3:
-		out = "," + s.right(3) + out
-		s = s.left(s.length() - 3)
-	return s + out
 
 ## Where the simulation lives: the plat-sim sidecar next to the executable,
 ## plat-econ shipped beside the exe, PLAT_SIM, a dev checkout, or nothing.
@@ -655,11 +628,10 @@ func _break_ground() -> void:
 		return
 	var runner := _resolve_runner()
 	if runner == "":
-		_card.text = "no simulation found\n(plat-sim.mjs beside the executable,\nor set PLAT_SIM)"
-		_card.visible = true
+		_ui.show_error("No simulation", "plat-sim.mjs beside the executable, or set PLAT_SIM")
 		return
 	_busy = true
-	_hud.text = "breaking ground (generating island, founding firm)..."
+	_ui.set_status("breaking ground (generating island, founding firm)...")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var dir := ProjectSettings.globalize_path("user://campaigns/c%d" % (randi() % 1000000))
@@ -670,8 +642,7 @@ func _break_ground() -> void:
 	out = ran[1]
 	_busy = false
 	if code != 0:
-		_card.text = "break ground FAILED\n" + "".join(out).right(200)
-		_card.visible = true
+		_ui.show_error("Break ground failed", "".join(out).right(200))
 		return
 	_campaign_dir = dir
 	_city_file = dir + "/city.json"
@@ -690,7 +661,7 @@ func _buy_selected() -> void:
 		return
 	var bbl := str(_selected.get("bbl", ""))
 	_busy = true
-	_hud.text = "buying %s..." % bbl
+	_ui.set_status("buying %s..." % bbl)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var meta: Variant = JSON.parse_string(
@@ -707,8 +678,8 @@ func _buy_selected() -> void:
 	if code != 0:
 		var res: Variant = JSON.parse_string(
 				FileAccess.get_file_as_string(_campaign_dir + "/result.json"))
-		_card.text = "BUY FAILED\n%s" % str((res as Dictionary).get("err", "?")) \
-				if res is Dictionary else "BUY FAILED"
+		_ui.show_error("Buy failed", str((res as Dictionary).get("err", "?")) \
+				if res is Dictionary else "unknown error")
 		return
 	_load_game_hud()
 	_rebuild()
@@ -753,39 +724,31 @@ func _pick_affordable_listing() -> void:
 	_show_card(best)
 
 func _update_hud() -> void:
-	if city == null or city.rig == null:
+	if city == null or city.rig == null or _ui == null:
 		return
-	var plan_line := ""
-	if city._plan != null:
-		plan_line = "\n%s" % city._plan.describe().replace("plan ", "")
-	elif city._import != null:
-		plan_line = "\n%s — engine city (%d buildings)" % [city._import.name,
-				city._import.buildings.size()]
+	_ui.set_fps(_fps)
+	_ui.refresh_vitals(_hud_game, _campaign_dir != "")
+	var status := ""
+	if city._import != null:
+		status = "%s · %d buildings · %s" % [
+				city._import.name, city._import.buildings.size(), city.rig.describe()]
+	elif city._plan != null:
+		status = city._plan.describe().replace("plan ", "")
+	if _busy:
+		pass  # status text set by the operation in flight
+	else:
+		_ui.set_status(status)
 	var help := ""
 	if _help_visible:
 		if _campaign_dir != "":
-			help = "\n\nSPACE advance a season   B buy selected   TAB for-sale tape   M owners overlay"
-		if _campaign_dir == "":
-			help = "\n\nF1 BREAK GROUND — found a firm on a fresh island"
-		help += ("\n\nleft-drag pan   right-drag / ctrl+left rotate+tilt   wheel zoom-at-cursor"
-				+ "\narrows pan   shift+arrows rotate/tilt   double-click zoom   compass = north"
-				+ "\nV free-fly (WASD + RMB look + Q/E up-down)   C downtown   1/2/3 presets"
-				+ "\nT/G time   N new city   E engine city   F preset view"
-				+ "\nH help   F12 screenshot   Esc quit")
-	var game_line := ""
-	if not _hud_game.is_empty():
-		game_line = "\nPLAT — %s | %s | %s | cash $%.2fM | %d holdings%s" % [
-				str(_hud_game.get("firm", "?")), str(_hud_game.get("city", "?")),
-				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6,
-				int(_hud_game.get("holdings", 0)),
-				"" if _hud_game.get("occ") == null else " | occ %.0f%%" % (float(_hud_game.get("occ", 0)) * 100.0)]
-		game_line += " | %d for sale (TAB)" % int(_hud_game.get("listings", 0))
-		var att: Array = _hud_game.get("attention", [])
-		if not att.is_empty():
-			game_line += "\n! " + " · ".join(PackedStringArray(att))
-	_hud.text = "plat — %.0f fps | %s | at (%.0f, %.0f) | %02d:%02d%s%s%s" % [
-			_fps, city.rig.describe(), _target.x, _target.y, int(time_of_day),
-			int(fposmod(time_of_day, 1.0) * 60.0), game_line, plan_line, help]
+			help = ("Advance · Buy · Listings (Tab) · Owners lens\n"
+					+ "Space advance season · B buy · Tab cycle listings · M owners overlay")
+		else:
+			help = "F1 or Break ground — found a firm on a fresh island"
+		help += ("\n\nPan: left-drag · Rotate/tilt: right-drag · Zoom: wheel at cursor"
+				+ "\nV free-fly · C downtown · H toggle help · Esc quit")
+	_ui.set_help(help, _help_visible)
+	_ui.set_owners_lens(ContextGen.overlay == "owners")
 	if _compass:
 		var br := city.rig.bearing()
 		_compass.text = "N\n%03d°" % int(fposmod(br, 360.0))
