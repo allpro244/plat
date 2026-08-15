@@ -430,9 +430,10 @@ Shipped in the same PR as the first playable B&W session:
 - Inbox: Open → routed page. Empty state offers Acquire.
 - Mouse-only for the session. Keys remain accelerators.
 
-Still not B&W-complete: Deals, Portfolio, Debt, Leasing, Staff, Notes,
-Research, Books, News, Economy rooms are titled stubs. Write verbs beyond
-buy-at-ask and develop are not on the runner yet. That is U6–U8.
+U6 (this cut): Portfolio, Property overview, News, Economy, Debt, and Books
+read `desks/*.json` written beside `hud.json`. Click a holding → property
+file. Capital and Assets have room nav. Write verbs beyond buy-at-ask and
+develop are still U7. Deals, Notes, Leasing, Staff, Research remain stubs.
 
 ---
 

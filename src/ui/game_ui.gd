@@ -334,10 +334,10 @@ func _build_page() -> void:
 	_page.add_child(wash)
 	var sheet := Panel.new()
 	sheet.set_anchors_preset(PRESET_CENTER)
-	sheet.offset_left = -520
-	sheet.offset_right = 520
-	sheet.offset_top = -320
-	sheet.offset_bottom = 320
+	sheet.offset_left = -540
+	sheet.offset_right = 540
+	sheet.offset_top = -340
+	sheet.offset_bottom = 340
 	sheet.add_theme_stylebox_override("panel", BwTheme.page_sheet())
 	sheet.mouse_filter = Control.MOUSE_FILTER_STOP
 	_page.add_child(sheet)
@@ -510,6 +510,12 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 		_grid_row("Appraised", _usd(float(b["value"])))
 	var listed: bool = bool(b.get("listed", false)) and not bool(b.get("held", false))
 	var has_ask: bool = float(b.get("ask", -1.0)) > 0.0
+	if float(b.get("noi", -1.0)) >= 0.0:
+		_grid_row("NOI / yr", _usd(float(b["noi"])))
+	if float(b.get("basis", -1.0)) > 0.0:
+		_grid_row("Basis", _usd(float(b["basis"])))
+	if float(b.get("debt", -1.0)) > 0.0:
+		_grid_row("Debt", _usd(float(b["debt"])))
 	if listed:
 		_deal_head.text = "For sale"
 		_deal_note.text = "Ask %s%s" % [_usd(float(b.get("ask", 0.0))),
@@ -580,48 +586,232 @@ func current_page() -> String:
 
 func set_market_rows(rows: Array) -> void:
 	_clear(_page_body)
+	_add_room_nav("market")
 	if rows.is_empty():
-		var empty := Label.new()
-		empty.text = "No listings on the tape this month."
-		BwTheme.style_label(empty, 13, false, true)
-		_page_body.add_child(empty)
+		_note("No listings on the tape this month.")
 		return
-	var head := HBoxContainer.new()
-	for t in ["Address", "Class", "Sf", "Ask", "Occ"]:
-		var h := Label.new()
-		h.text = t.to_upper()
-		h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		BwTheme.style_label(h, 10, false, true)
-		head.add_child(h)
-	_page_body.add_child(head)
+	_table_head(["Address", "Class", "Sf", "Ask", "Occ"])
 	for r in rows:
-		var b := Button.new()
-		var addr := str(r.get("address", r.get("bbl", "?")))
-		var ask := _usd(float(r.get("ask", 0)))
 		var occ = r.get("occ")
 		var occ_s := "—" if occ == null else "%.0f%%" % (float(occ) * 100.0)
-		b.text = "%s    %s    %s    %s    %s" % [
-				addr, str(r.get("cls", "")), _fmt_sf(float(r.get("sf", 0))), ask, occ_s]
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.add_theme_stylebox_override("normal", BwTheme.start_opt(false))
-		b.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
-		b.add_theme_color_override("font_color", BwTheme.INK)
-		b.add_theme_font_override("font", BwTheme.mono())
-		b.add_theme_font_size_override("font_size", 12)
-		var bbl := str(r.get("bbl", ""))
-		b.pressed.connect(func() -> void:
-			listing_chosen.emit(bbl)
-			hide_page())
-		_page_body.add_child(b)
+		var line := "%s    %s    %s    %s    %s" % [
+				str(r.get("address", r.get("bbl", "?"))),
+				str(r.get("cls", "")), _fmt_sf(float(r.get("sf", 0))),
+				_usd(float(r.get("ask", 0))), occ_s]
+		_row_btn(line, str(r.get("bbl", "")), true)
+
+
+func set_portfolio(doc: Dictionary) -> void:
+	_clear(_page_body)
+	_add_room_nav("portfolio")
+	var rows: Array = doc.get("rows", [])
+	var tot: Dictionary = doc.get("totals", {})
+	if rows.is_empty():
+		_note("Your book is empty. Start on the public tape — compare a rent roll, agree a price, then choose the debt.")
+		var go := _lens("Acquire →", false)
+		go.pressed.connect(func() -> void: open_page("market"))
+		_page_body.add_child(go)
+		return
+	_stat_strip([
+		["Holdings", str(int(tot.get("n", rows.size())))],
+		["Value", _usd(float(tot.get("value", 0)))],
+		["NOI / yr", _usd(float(tot.get("noi", 0)))],
+		["Debt", _usd(float(tot.get("debt", 0)))],
+		["Equity", _usd(float(tot.get("equity", 0)))],
+	])
+	_table_head(["Address", "Class", "Sf", "Occ", "NOI", "Value"])
+	for r in rows:
+		var occ = r.get("occ")
+		var occ_s := "—" if occ == null else "%.0f%%" % (float(occ) * 100.0)
+		var line := "%s    %s    %s    %s    %s    %s" % [
+				str(r.get("address", r.get("bbl", "?"))),
+				str(r.get("cls", "")), _fmt_sf(float(r.get("sf", 0))),
+				occ_s, _usd(float(r.get("noi", 0))), _usd(float(r.get("value", 0)))]
+		_row_btn(line, str(r.get("bbl", "")), false)
+
+
+func set_news(doc: Dictionary) -> void:
+	_clear(_page_body)
+	_add_room_nav("news")
+	var items: Array = doc.get("items", [])
+	if items.is_empty():
+		_note("Nothing on the wire yet. Advance a month.")
+		return
+	_note("The last %d items, newest first. A row with a parcel opens it on the map." % items.size())
+	var last_when := ""
+	for n in items:
+		var when := str(n.get("when", ""))
+		if when != last_when:
+			last_when = when
+			var head := Label.new()
+			head.text = when.to_upper()
+			BwTheme.style_label(head, 10, false, true)
+			_page_body.add_child(head)
+		var text := str(n.get("text", ""))
+		var bbl := str(n.get("bbl", ""))
+		var kind := str(n.get("kind", "info"))
+		if bbl != "" and bbl != "<null>":
+			_row_btn(text + "  ✈", bbl, true)
+		else:
+			var lab := Label.new()
+			lab.text = text
+			lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			lab.add_theme_font_override("font", BwTheme.sans())
+			lab.add_theme_font_size_override("font_size", 13)
+			lab.add_theme_color_override("font_color",
+					BwTheme.DANGER if kind == "warn" else BwTheme.INK)
+			_page_body.add_child(lab)
+
+
+func set_economy(doc: Dictionary) -> void:
+	_clear(_page_body)
+	_add_room_nav("economy")
+	var phase := str(doc.get("phase", "—"))
+	_stat_strip([
+		["Cycle", phase.capitalize()],
+		["Base rate", _pct(doc.get("indexRate"), 2)],
+		["Credit", _pct_idx(doc.get("creditIdx"))],
+		["Employment", _pct_idx(doc.get("employIdx"))],
+		["Build costs", _pct_idx(doc.get("costIdx"))],
+		["Land", _pct_idx(doc.get("landIdx"))],
+	])
+	var blurb := _phase_blurb(phase)
+	var rumor = doc.get("rumoredPhase")
+	if rumor != null and str(rumor) != "" and str(rumor) != "<null>":
+		blurb += " Word on the street: %s is coming." % str(rumor)
+	_note(blurb)
+	var sec := Label.new()
+	sec.text = "WHERE THE CITY STANDS"
+	BwTheme.style_label(sec, 10, false, true)
+	_page_body.add_child(sec)
+	_kv("Population", _commify(doc.get("population")))
+	_kv("Jobs", _commify(doc.get("jobs")))
+	if doc.get("jobsYr") != null:
+		_kv("Jobs this year", "%s%.1f%%" % ["+" if float(doc["jobsYr"]) >= 0.0 else "", float(doc["jobsYr"])])
+	_kv("Unemployment", _pct(doc.get("unemployment"), 1, true))
+	var classes: Dictionary = doc.get("classes", {})
+	if not classes.is_empty():
+		var ch := Label.new()
+		ch.text = "SPACE MARKETS"
+		BwTheme.style_label(ch, 10, false, true)
+		_page_body.add_child(ch)
+		_table_head(["Class", "Vacancy", "Rent idx", "Cap"])
+		for k in ["office", "retail", "multifamily", "industrial"]:
+			if not classes.has(k):
+				continue
+			var c: Dictionary = classes[k]
+			var line := "%s    %s    %s    %s" % [
+					k, _pct(c.get("vac"), 1, true),
+					_num(c.get("rent"), 2), _pct(c.get("cap"), 2, true)]
+			var lab := Label.new()
+			lab.text = line
+			BwTheme.style_label(lab, 13, true)
+			_page_body.add_child(lab)
+
+
+func set_debt(doc: Dictionary) -> void:
+	_clear(_page_body)
+	_add_room_nav("debt")
+	var loc: Dictionary = doc.get("loc", {})
+	var tot: Dictionary = doc.get("totals", {})
+	_stat_strip([
+		["Line", _usd(float(loc.get("limit", 0)))],
+		["Drawn", _usd(float(loc.get("drawn", 0)))],
+		["Available", _usd(float(loc.get("available", 0)))],
+		["Coupon", _pct(loc.get("rate"), 2)],
+		["Book debt", _usd(float(tot.get("total", 0)))],
+	])
+	var loans: Array = doc.get("loans", [])
+	if loans.is_empty():
+		_note("No mortgages on the book. The line is the only paper.")
+		return
+	_table_head(["Address", "Kind", "Balance", "Rate", "Due"])
+	for r in loans:
+		var rate = r.get("rate")
+		var line := "%s    %s    %s    %s    %s" % [
+				str(r.get("address", "—")), str(r.get("kind", "")),
+				_usd(float(r.get("balance", 0))),
+				"—" if rate == null else "%.2f%%" % float(rate),
+				str(r.get("maturity", "—"))]
+		_row_btn(line, str(r.get("bbl", "")), false)
+
+
+func set_books(doc: Dictionary) -> void:
+	_clear(_page_body)
+	_add_room_nav("books")
+	_stat_strip([
+		["Cash", _usd(float(doc.get("cash", 0)))],
+		["Net worth", _usd(float(doc.get("nw", 0))) if doc.get("nw") != null else "—"],
+		["CF / mo", _usd(float(doc.get("cf", 0))) if doc.get("cf") != null else "—"],
+		["Taxes paid", _usd(float(doc.get("taxesPaid", 0)))],
+		["Exits", str(int(doc.get("exits", 0)))],
+	])
+	var years: Array = doc.get("years", [])
+	if years.is_empty():
+		_note("The ledger is empty. Buy something, then Advance.")
+		return
+	_table_head(["Year", "NOI", "Debt svc", "Bought", "Sold", "Tax"])
+	for y in years:
+		var lab := Label.new()
+		lab.text = "%s    %s    %s    %s    %s    %s" % [
+				str(y.get("when", y.get("yr", "?"))),
+				_usd(float(y.get("noi", 0))), _usd(float(y.get("debtSvc", 0))),
+				_usd(float(y.get("bought", 0))), _usd(float(y.get("sold", 0))),
+				_usd(float(y.get("taxes", 0)))]
+		BwTheme.style_label(lab, 13, true)
+		_page_body.add_child(lab)
+
+
+func set_property_overview(b: Dictionary) -> void:
+	_clear(_page_body)
+	_add_room_nav("property")
+	if b.is_empty():
+		_note("Click a building on the map, then open Full view.")
+		return
+	var addr := str(b.get("address", "")).strip_edges()
+	var title := Label.new()
+	title.text = addr if addr != "" else _class_title(str(b.get("cls", "?")))
+	title.add_theme_font_override("font", BwTheme.serif())
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", BwTheme.INK)
+	_page_body.add_child(title)
+	_note("Parcel %s · %s" % [str(b.get("bbl", "?")), str(b.get("district", "")).to_upper()])
+	_kv("Use", _class_title(str(b.get("cls", "?"))))
+	_kv("Building", _fmt_sf(float(b.get("sqft", b.get("sf", 0)))) + " sf")
+	_kv("Lot", _fmt_sf(float(b.get("lot_sqft", b.get("lotSf", 0)))) + " sf")
+	_kv("Floors", str(int(b.get("floors", 0))))
+	_kv("Built", str(int(b.get("year", 0))))
+	if float(b.get("occ", -1.0)) >= 0.0:
+		_kv("Occupancy", "%.0f%%" % (float(b["occ"]) * 100.0))
+	if float(b.get("value", -1.0)) > 0.0:
+		_kv("Appraised", _usd(float(b["value"])))
+	if float(b.get("noi", -1.0)) >= 0.0:
+		_kv("NOI / yr", _usd(float(b["noi"])))
+	if float(b.get("basis", -1.0)) > 0.0:
+		_kv("Basis", _usd(float(b["basis"])))
+	if float(b.get("debt", -1.0)) > 0.0:
+		_kv("Debt", _usd(float(b["debt"])))
+	if bool(b.get("listed", false)) and not bool(b.get("held", false)) and float(b.get("ask", 0)) > 0.0:
+		_kv("Ask", _usd(float(b["ask"])))
+		var buy := Button.new()
+		buy.text = "Buy at ask"
+		buy.add_theme_stylebox_override("normal", BwTheme.buy_btn())
+		buy.add_theme_stylebox_override("hover", BwTheme.buy_btn())
+		buy.add_theme_stylebox_override("pressed", BwTheme.buy_btn())
+		buy.add_theme_color_override("font_color", Color("#f6efdc"))
+		buy.pressed.connect(func() -> void:
+			hide_page()
+			buy_pressed.emit())
+		_page_body.add_child(buy)
+	var map := _lens("Show on the map", false)
+	map.pressed.connect(hide_page)
+	_page_body.add_child(map)
 
 
 func set_page_note(text: String) -> void:
 	_clear(_page_body)
-	var lab := Label.new()
-	lab.text = text
-	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	BwTheme.style_label(lab, 14, false, true)
-	_page_body.add_child(lab)
+	_add_room_nav(_page_name)
+	_note(text)
 
 
 func _open_job(job: String) -> void:
@@ -652,18 +842,117 @@ func _page_meta(page: String) -> PackedStringArray:
 		"notes": return PackedStringArray(["Acquire", "The Note Desk",
 				"Distressed paper — export not wired yet."])
 		"portfolio": return PackedStringArray(["Assets", "Portfolio",
-				"Holdings and income — export not wired yet."])
+				"Your deeds. Click a row to open the file."])
 		"property": return PackedStringArray(["Assets", "Property",
-				"The complete file. Overview is the glance card; more tabs follow."])
+				"The complete file. Overview now; rent roll and build follow."])
 		"debt": return PackedStringArray(["Capital", "Debt",
-				"Loans and the line — export not wired yet."])
+				"The line and every loan the engine has written."])
 		"books": return PackedStringArray(["Capital", "The Books",
-				"Cash movement — export not wired yet."])
+				"Cash, net worth, and the yearly ledger."])
 		"news": return PackedStringArray(["World", "The Tape",
-				"What the city wrote this month — export not wired yet."])
+				"What the city wrote. Newest first."])
 		"economy": return PackedStringArray(["Economy", "Economy",
-				"Cycle and space markets — export not wired yet."])
+				"The cycle and the four space markets."])
 		_: return PackedStringArray(["Desk", page.capitalize(), "Coming."])
+
+
+func _add_room_nav(page: String) -> void:
+	var siblings := _siblings_of(page)
+	if siblings.size() <= 1:
+		return
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	for s in siblings:
+		var id: String = s[0]
+		var b := _lens(s[1], id == page)
+		b.pressed.connect(func() -> void: open_page(id))
+		row.add_child(b)
+	_page_body.add_child(row)
+
+
+func _siblings_of(page: String) -> Array:
+	match _job_of(page):
+		"acquire":
+			return [["market", "Marketplace"], ["deals", "Deals"], ["notes", "Notes"]]
+		"assets":
+			return [["portfolio", "Portfolio"], ["property", "Property"]]
+		"capital":
+			return [["debt", "Debt"], ["books", "Books"]]
+		"world":
+			return [["news", "News"]]
+		_:
+			return []
+
+
+func _note(text: String) -> void:
+	var lab := Label.new()
+	lab.text = text
+	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	BwTheme.style_label(lab, 13, false, true)
+	_page_body.add_child(lab)
+
+
+func _table_head(cols: Array) -> void:
+	var head := HBoxContainer.new()
+	for t in cols:
+		var h := Label.new()
+		h.text = str(t).to_upper()
+		h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		BwTheme.style_label(h, 10, false, true)
+		head.add_child(h)
+	_page_body.add_child(head)
+
+
+func _row_btn(text: String, bbl: String, close: bool) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_stylebox_override("normal", BwTheme.start_opt(false))
+	b.add_theme_stylebox_override("hover", BwTheme.start_opt(true))
+	b.add_theme_color_override("font_color", BwTheme.INK)
+	b.add_theme_font_override("font", BwTheme.mono())
+	b.add_theme_font_size_override("font_size", 12)
+	if bbl != "" and bbl != "<null>":
+		b.pressed.connect(func() -> void:
+			listing_chosen.emit(bbl)
+			if close:
+				hide_page()
+			else:
+				open_page("property"))
+	_page_body.add_child(b)
+
+
+func _stat_strip(items: Array) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 18)
+	for it in items:
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", 0)
+		var k := Label.new()
+		k.text = str(it[0]).to_upper()
+		BwTheme.style_label(k, 9, false, true)
+		box.add_child(k)
+		var v := Label.new()
+		v.text = str(it[1])
+		BwTheme.style_label(v, 14, true)
+		box.add_child(v)
+		row.add_child(box)
+	_page_body.add_child(row)
+
+
+func _kv(key: String, value: String) -> void:
+	var row := HBoxContainer.new()
+	var k := Label.new()
+	k.text = key
+	k.custom_minimum_size.x = 140
+	BwTheme.style_label(k, 13, false, true)
+	row.add_child(k)
+	var v := Label.new()
+	v.text = value
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	BwTheme.style_label(v, 13, true)
+	row.add_child(v)
+	_page_body.add_child(row)
 
 
 func _add_chip(text: String, bg: Color, muted: bool = false) -> void:
@@ -689,6 +978,58 @@ func _grid_row(key: String, value: String) -> void:
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	BwTheme.style_label(v, 13, true)
 	_grid.add_child(v)
+
+
+static func _phase_blurb(phase: String) -> String:
+	match phase:
+		"expansion":
+			return "Tenants expand, capital chases, rents push. Enjoy it — peaks are born here."
+		"peak":
+			return "Priced to perfection. Every deal works on paper and none has margin for the turn."
+		"recession":
+			return "Tenants retrench and lenders retreat. Cheap buildings and expensive money."
+		"recovery":
+			return "The bleeding has stopped. Concessions burn off before face rents move."
+		"depression":
+			return "Empty space is still winning. This is not healing — it is a glut that has not cleared."
+		_:
+			return "The cycle the four space markets are living in."
+
+
+static func _pct(v, places: int = 1, fraction: bool = false) -> String:
+	if v == null:
+		return "—"
+	var n := float(v)
+	if fraction:
+		n *= 100.0
+	if places <= 0:
+		return "%.0f%%" % n
+	if places == 1:
+		return "%.1f%%" % n
+	return "%.2f%%" % n
+
+
+static func _pct_idx(v) -> String:
+	if v == null:
+		return "—"
+	return "%.0f" % (float(v) * 100.0)
+
+
+static func _num(v, _places: int = 2) -> String:
+	if v == null:
+		return "—"
+	return "%.2f" % float(v)
+
+
+static func _commify(v) -> String:
+	if v == null:
+		return "—"
+	var s := str(int(roundf(float(v))))
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.right(3) + out
+		s = s.left(s.length() - 3)
+	return s + out
 
 
 static func _class_title(cls: String) -> String:

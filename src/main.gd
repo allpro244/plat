@@ -82,6 +82,11 @@ var _city_file := ""       # a plat-city/1 export; when set, the viewer plays it
 var _campaign_dir := ""    # a game-server campaign; when set, plat IS the game view
 var _hud_game := {}        # firm/date/cash from the campaign's hud.json
 var _market_rows: Array = []
+var _portfolio: Dictionary = {}
+var _news: Dictionary = {}
+var _economy: Dictionary = {}
+var _debt: Dictionary = {}
+var _books: Dictionary = {}
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
@@ -305,6 +310,28 @@ func _run_selftest() -> void:
 					int(_hud_game.get("holdings", 0))])
 			if _ui.is_parcel_visible():
 				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
+			_ui.open_page("portfolio")
+			_on_page_opened("portfolio")
+			var port_n := 0
+			var tot: Variant = _portfolio.get("totals", {})
+			if tot is Dictionary:
+				port_n = int((tot as Dictionary).get("n", 0))
+			print("[plat] selftest portfolio: %d holdings" % port_n)
+			for i in range(10):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_portfolio.png")
+			_ui.open_page("economy")
+			_on_page_opened("economy")
+			print("[plat] selftest economy: %s" % str(_economy.get("phase", "?")))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_economy.png")
+			_ui.open_page("news")
+			_on_page_opened("news")
+			print("[plat] selftest news: %d items" % int((_news.get("items", []) as Array).size()))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_news.png")
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
@@ -634,7 +661,7 @@ func _pick_building(screen: Vector2) -> void:
 
 func _show_card(b: Dictionary) -> void:
 	_selected = b
-	_ui.show_parcel(b, _campaign_dir != "")
+	_ui.show_parcel(_enrich(b), _campaign_dir != "")
 
 
 ## Where the simulation lives: the plat-sim sidecar next to the executable,
@@ -728,24 +755,64 @@ func _open_campaign(dir: String) -> void:
 func _load_desks() -> void:
 	if _campaign_dir == "" or _ui == null:
 		return
-	var txt := FileAccess.get_file_as_string(_campaign_dir + "/desks/market.json")
+	_market_rows = _desk_file("market").get("rows", [])
+	_portfolio = _desk_file("portfolio")
+	_news = _desk_file("news")
+	_economy = _desk_file("economy")
+	_debt = _desk_file("debt")
+	_books = _desk_file("books")
+
+
+func _desk_file(name: String) -> Dictionary:
+	var txt := FileAccess.get_file_as_string(_campaign_dir + "/desks/" + name + ".json")
 	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
-	if doc is Dictionary:
-		_market_rows = (doc as Dictionary).get("rows", [])
-	else:
-		_market_rows = []
+	return doc if doc is Dictionary else {}
+
+
+func _holding_row(bbl: String) -> Dictionary:
+	for r in _portfolio.get("rows", []):
+		if r is Dictionary and str(r.get("bbl", "")) == bbl:
+			return r
+	return {}
+
+
+func _enrich(b: Dictionary) -> Dictionary:
+	var out := b.duplicate()
+	var row := _holding_row(str(b.get("bbl", "")))
+	if row.is_empty():
+		return out
+	out["held"] = true
+	if row.get("noi") != null:
+		out["noi"] = row["noi"]
+	if row.get("basis") != null:
+		out["basis"] = row["basis"]
+	if row.get("debt") != null:
+		out["debt"] = row["debt"]
+	if row.get("value") != null:
+		out["value"] = row["value"]
+	if row.get("occ") != null:
+		out["occ"] = row["occ"]
+	return out
 
 
 func _on_page_opened(page: String) -> void:
-	if page == "market":
-		_ui.set_market_rows(_market_rows)
-	elif page == "property":
-		if _selected.is_empty():
-			_ui.set_page_note("Click a building on the map, then open Full view.")
-		else:
-			_ui.set_page_note("Overview is on the glance card. Rent roll, money and build tabs ship as their exports land.")
-	else:
-		_ui.set_page_note("This desk is next. The engine already has the numbers; the export is not wired yet.")
+	match page:
+		"market":
+			_ui.set_market_rows(_market_rows)
+		"portfolio":
+			_ui.set_portfolio(_portfolio)
+		"news":
+			_ui.set_news(_news)
+		"economy":
+			_ui.set_economy(_economy)
+		"debt":
+			_ui.set_debt(_debt)
+		"books":
+			_ui.set_books(_books)
+		"property":
+			_ui.set_property_overview(_enrich(_selected) if not _selected.is_empty() else {})
+		_:
+			_ui.set_page_note("This desk is next. The engine already has the numbers; the export is not wired yet.")
 
 
 func _on_lens(name: String, on: bool) -> void:

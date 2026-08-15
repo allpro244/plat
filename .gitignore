@@ -19,6 +19,9 @@ export_presets.cfg
 !/renders/ui_proof.png
 !/renders/ui_current.png
 !/renders/ui_start.png
+!/renders/ui_portfolio.png
+!/renders/ui_economy.png
+!/renders/ui_news.png
 
 # Local checkout of the economy engine (dev path main.gd expects).
 # Public repo; clone it beside plat, do not commit it here.
