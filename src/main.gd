@@ -339,6 +339,7 @@ func _run_selftest() -> void:
 		_pick_affordable_listing()
 		if not _selected.is_empty():
 			print("[plat] selftest listing: ", _ui.parcel_debug_text())
+			_ui.hide_page()
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_card.png")
@@ -1452,7 +1453,7 @@ func _pick_approachable() -> void:
 	if city == null or city._import == null:
 		return
 	var best: Dictionary = {}
-	var best_sf := 0.0
+	var best_score := -1.0
 	for b in city._import.buildings:
 		if b.get("deco", false) or b.get("held", false) or b.get("listed", false):
 			continue
@@ -1462,11 +1463,17 @@ func _pick_approachable() -> void:
 		if ap is Dictionary and not (ap as Dictionary).is_empty():
 			continue
 		var sf := float(b.get("sqft", 0.0))
-		if sf < 4000.0:
+		if sf < 4000.0 or sf > 40000.0:
 			continue
-		if sf > best_sf:
+		var cls := str(b.get("cls", ""))
+		if cls == "land" or cls == "multifamily":
+			continue
+		# Prefer a mid-block office/retail a player would actually knock on,
+		# not the 260k-sf waterfront that always slams the door.
+		var score := 1.0 / (1.0 + absf(sf - 8000.0) / 8000.0)
+		if score > best_score:
 			best = b
-			best_sf = sf
+			best_score = score
 	if best.is_empty():
 		_selected = {}
 		return
