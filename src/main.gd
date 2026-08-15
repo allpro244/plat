@@ -53,6 +53,7 @@ var _fps_accum := 0.0
 var _fps_frames := 0
 var _fps := 0.0
 var _selftest := false
+var _uishot := false
 var _target := Vector2.ZERO      # orbit centre, world XZ (eased, applied)
 # Goal state: inputs write here; _process eases the applied state toward it.
 var _g_bearing := 225.0
@@ -82,6 +83,7 @@ var _hud_game := {}        # firm/date/cash from the campaign's hud.json
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
+	_uishot = "--uishot" in OS.get_cmdline_user_args()
 	# The game OPENS in an engine city: parcels, records, clickable
 	# buildings. Launching into the renderer's own seeded testbed made
 	# every click a no-op — the first thing the owner tried. N still
@@ -102,7 +104,7 @@ func _ready() -> void:
 	# Acceptance: `godot -- --selftest` must exercise the deal loop, not
 	# just the viewer. Found a firm on seed 1928 when the caller did not
 	# already pass --campaign=.
-	if _selftest and _campaign_dir == "":
+	if (_selftest or _uishot) and _campaign_dir == "":
 		_bootstrap_selftest_campaign()
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -208,6 +210,8 @@ func _rebuild() -> void:
 	_busy = false
 	if _selftest:
 		await _run_selftest()
+	elif _uishot:
+		await _run_uishot()
 
 ## Headless proof that the interactive path works: exercise the free-flow
 ## camera, the parcel card, a campaign advance and a buy, save frames, quit.
@@ -305,6 +309,34 @@ func _run_selftest() -> void:
 	print("[plat] selftest OK -> ", ProjectSettings.globalize_path(
 			"res://renders/playable_selftest.png"))
 	get_tree().quit(0)
+
+## Honest current-chrome frame for docs/UI-PLAN.md. Downtown, listing on
+## the card, vitals populated. Not a claim that the desk is done.
+func _run_uishot() -> void:
+	_uishot = false
+	_help_visible = false
+	if city._import != null:
+		_g_target = city._import.core
+	_g_bearing = 210.0
+	_g_pitch = 56.0
+	_g_distance = 320.0
+	_snap()
+	for i in range(8):
+		await get_tree().process_frame
+	_pick_affordable_listing()
+	if not _ui.is_parcel_visible() and city._import != null:
+		for b in city._import.buildings:
+			if b.get("listed", false) and not b.get("deco", false):
+				_show_card(b)
+				break
+	_update_hud()
+	for i in range(12):
+		await get_tree().process_frame
+	await _save_frame("renders/ui_current.png")
+	print("[plat] uishot OK -> ", ProjectSettings.globalize_path(
+			"res://renders/ui_current.png"))
+	get_tree().quit(0)
+
 
 func _save_frame(rel: String) -> void:
 	await RenderingServer.frame_post_draw

@@ -21,7 +21,10 @@ engine through the campaign runner. Nothing below moves a number into GDScript.
 - The parcel card: click a building, read BBL / class / district / sqft /
   floors / year / occupancy (selftest-proven, in the shipped build).
 - The full BW web UI runs in plat-econ (`pnpm dev`) — the reference
-  implementation for every desk, and the spec for panel behavior.
+implementation for every desk, and the spec for panel behavior. The
+native Godot port is specified in `docs/UI-PLAN.md`: mouse-first, jobs
+and desk rooms, glance card vs parchment page. Do not implement chrome
+that the plan has not reached.
 
 ## Phase 1 — The sim ships inside the game (no Node install)
 
