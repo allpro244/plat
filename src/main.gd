@@ -132,15 +132,15 @@ func _ready() -> void:
 	_ui.lens_pressed.connect(_on_lens)
 	_ui.attention_opened.connect(_on_attention)
 	_build_nav_widget(layer)
-	_ui.set_status("generating city...")
-	await get_tree().process_frame
-	await _rebuild()
 	_refresh_resume()
 	if _campaign_dir != "":
 		_ui.set_playing(true)
 		_load_desks()
 	else:
 		_ui.set_playing(false)
+	_ui.set_status("generating city...")
+	await get_tree().process_frame
+	await _rebuild()
 
 ## MapLibre NavigationControl analogue: compass resets bearing; +/− zoom.
 func _build_nav_widget(layer: CanvasLayer) -> void:
@@ -231,6 +231,9 @@ func _run_selftest() -> void:
 	# One run only: the campaign-advance step below rebuilds the city, and a
 	# rebuild re-entering the selftest would loop forever.
 	_selftest = false
+	if _campaign_dir != "":
+		_ui.set_playing(true)
+		_load_desks()
 	# Camera proof: two framings the old band clamp would have rejected.
 	# Street — closer than the old near floor (70 m / 130 m), aimed at the
 	# downtown core so the frame is buildings, not the origin park.
