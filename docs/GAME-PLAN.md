@@ -91,9 +91,10 @@ grows the UI that drives it. Order chosen so each step is playable alone:
 - **Construction cranes**: a tower crane stands on every lot the sim has
   marked `developing`. Height is `devFloors` × 3.5 m. Raised on the
   develop verb without remeshing the city.
-- **Delta rebuilds**: advancing a season re-imports only parcels whose
-  records changed (the export is already per-BBL; chunk rebuild keyed by
-  changed BBLs) so time passes in ~a second, not a full regeneration.
+- **Delivery remesh**: `buildCityDoc` writes live floors/class onto
+  `buildings3d` (storey height 3.55 m, the citygen constant). The crane
+  comes down because `developing` is gone; the pad extrudes because z1
+  changed. Live refresh remeshes only then.
 
 ## Phase 5 — A century in one sitting
 
