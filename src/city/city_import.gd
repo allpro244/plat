@@ -140,17 +140,10 @@ static func load_city(path: String) -> CityImport:
 		var bb := Rect2(ring[0], Vector2.ZERO)
 		for q in ring:
 			bb = bb.expand(q)
-		ci.buildings.append({
+		var rec := {
 			"bbl": bbl,
 			"ring": ring,
 			"bbox": bb,
-			"sqft": float(par.get("bldgArea", 0.0)),
-			"lot_sqft": float(par.get("lotArea", 0.0)),
-			"held": int(par.get("held", 0)) == 1,
-			"value": float(par.get("value", -1.0)),
-			"ask": float(par.get("ask", -1.0)),
-			"listed": int(par.get("listed", 0)) == 1,
-			"distress": int(par.get("distress", 0)) == 1,
 			"z0": float(b.get("z0", 0.0)),
 			"z1": float(b.get("z1", 0.0)),
 			"cls": str(b.get("c", "?")),
@@ -159,13 +152,9 @@ static func load_city(path: String) -> CityImport:
 			"tone": int(b.get("t", 0)),
 			"deco": int(b.get("d", 0)) == 1,
 			"crown": int(b.get("x", 0)) == 1,
-			"district": str(par.get("district", "?")),
-			"demand": float(par.get("demandScore", 0.0)),
-			# The economy's occupancy for this parcel (0-1), simulated by
-			# the engine when the export ran with --months. Drives dusk
-			# windows; absent in old exports -> -1 sentinel.
-			"occ": float(par.get("occ", -1.0)),
-		})
+		}
+		stamp_live(rec, par)
+		ci.buildings.append(rec)
 	var esp_m2 := 0.0
 	for r in ci.esplanade:
 		esp_m2 += absf(_shoelace(r))
@@ -175,6 +164,63 @@ static func load_city(path: String) -> CityImport:
 			% [ci.streets.size(), ci.pavements.size(), ci.esplanade.size(), esp_m2,
 			ci.parks.size(), ci.piers.size()])
 	return ci
+
+## Fields the sim can change without new massing. load_city and
+## refresh_parcels share this so a buy or a month tick cannot drift.
+static func stamp_live(b: Dictionary, par: Dictionary) -> void:
+	b["sqft"] = float(par.get("bldgArea", 0.0))
+	b["lot_sqft"] = float(par.get("lotArea", 0.0))
+	b["held"] = int(par.get("held", 0)) == 1
+	b["developing"] = int(par.get("developing", 0)) == 1
+	b["value"] = float(par.get("value", -1.0))
+	b["ask"] = float(par.get("ask", -1.0))
+	b["listed"] = int(par.get("listed", 0)) == 1
+	b["distress"] = int(par.get("distress", 0)) == 1
+	b["district"] = str(par.get("district", "?"))
+	b["address"] = str(par.get("address", ""))
+	b["demand"] = float(par.get("demandScore", 0.0))
+	# The economy's occupancy for this parcel (0-1). Drives dusk windows;
+	# absent in old exports -> -1 sentinel.
+	b["occ"] = float(par.get("occ", -1.0))
+	b["approach"] = par.get("approach", {})
+
+## Re-read city.json onto the existing building records. Returns true when
+## a volume's massing changed (a tower delivered). Volumes pair by import
+## order: one BBL can be several masses.
+func refresh_parcels(path: String) -> bool:
+	var txt := FileAccess.get_file_as_string(path)
+	if txt.is_empty():
+		return false
+	var doc: Variant = JSON.parse_string(txt)
+	if not (doc is Dictionary) or str(doc.get("format", "")) != "plat-city/1":
+		return false
+	var parcels: Dictionary = doc.get("parcels", {})
+	var live: Array = []
+	for raw in doc.get("buildings3d", []):
+		if not (raw is Dictionary):
+			continue
+		# Same skip as load_city: a ring under 3 points never became a volume.
+		if ((raw as Dictionary).get("r", []) as Array).size() < 3:
+			continue
+		live.append(raw)
+	# Pair by import order, not BBL. One parcel can be several volumes
+	# (setback, annex, deco). Last-write-wins on BBL compared a 9 m
+	# podium to a 51 m tower and remeshed every month.
+	if live.size() != buildings.size():
+		return true
+	for i in range(buildings.size()):
+		var rec: Dictionary = live[i]
+		var b: Dictionary = buildings[i]
+		if str(rec.get("b", "")) != str(b.get("bbl", "")):
+			return true
+		if absf(float(rec.get("z1", b["z1"])) - float(b["z1"])) > 0.05 \
+				or int(rec.get("f", b["floors"])) != int(b["floors"]) \
+				or str(rec.get("c", b["cls"])) != str(b["cls"]):
+			return true
+		var bbl := str(b.get("bbl", ""))
+		if bbl != "":
+			stamp_live(b, parcels.get(bbl, {}))
+	return false
 
 ## All rings of one GeoJSON polygon, holes subtracted (clip returns the
 ## remainder as simple polygons Geometry2D can triangulate).

@@ -49,6 +49,9 @@ if [ ! -f plat-econ/test/.engine.mjs ]; then
     pnpm engine
   )
 fi
+# Desk exports + richer HUD live in plat until plat-econ merges them.
+cp -a tools/runner/citydoc.mjs plat-econ/tools/citydoc.mjs
+cp -a tools/runner/game-server.mjs plat-econ/tools/game-server.mjs
 
 write_play_txt() {
   cat > "$1/PLAY.txt" <<'EOF'
@@ -56,8 +59,8 @@ PLAT — Broadway & Wall in 3D
 
 1. Double-click plat.exe (Windows) or plat.x86_64 (Linux).
 2. Wait ~10 seconds while the city and your firm load.
-3. Click any building to read its record and price.
-4. Space = advance time.  B = buy selected.  H = full controls.
+3. Break ground (or Continue). Click Acquire for the marketplace tape.
+4. Click a listing or a building, then Buy at ask. Advance moves a month.
 
 Left-drag pans.  Right-drag rotates.  Mouse wheel zooms.
 EOF

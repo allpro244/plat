@@ -53,6 +53,8 @@ var _fps_accum := 0.0
 var _fps_frames := 0
 var _fps := 0.0
 var _selftest := false
+var _uishot := false
+var _startshot := false
 var _target := Vector2.ZERO      # orbit centre, world XZ (eased, applied)
 # Goal state: inputs write here; _process eases the applied state toward it.
 var _g_bearing := 225.0
@@ -79,9 +81,23 @@ var _engine_pick := -1
 var _city_file := ""       # a plat-city/1 export; when set, the viewer plays it
 var _campaign_dir := ""    # a game-server campaign; when set, plat IS the game view
 var _hud_game := {}        # firm/date/cash from the campaign's hud.json
+var _market_rows: Array = []
+var _portfolio: Dictionary = {}
+var _news: Dictionary = {}
+var _economy: Dictionary = {}
+var _debt: Dictionary = {}
+var _books: Dictionary = {}
+var _dev_options: Array = []
+var _refi_quotes: Array = []
+var _map_desk: Dictionary = {}
+var _deals: Dictionary = {}
+var _leasing: Dictionary = {}
+var _deeds: Dictionary = {}
 
 func _ready() -> void:
 	_selftest = "--selftest" in OS.get_cmdline_user_args()
+	_uishot = "--uishot" in OS.get_cmdline_user_args()
+	_startshot = "--startshot" in OS.get_cmdline_user_args()
 	# The game OPENS in an engine city: parcels, records, clickable
 	# buildings. Launching into the renderer's own seeded testbed made
 	# every click a no-op — the first thing the owner tried. N still
@@ -102,33 +118,49 @@ func _ready() -> void:
 	# Acceptance: `godot -- --selftest` must exercise the deal loop, not
 	# just the viewer. Found a firm on seed 1928 when the caller did not
 	# already pass --campaign=.
-	if _selftest and _campaign_dir == "":
+	if (_selftest or _uishot) and _campaign_dir == "" and not _startshot:
 		_bootstrap_selftest_campaign()
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_ui = GameUi.new()
 	layer.add_child(_ui)
-	_ui.advance_pressed.connect(func() -> void: _advance_campaign(3))
+	_ui.advance_pressed.connect(func() -> void: _advance_or_decide(1, false))
+	_ui.year_pressed.connect(func() -> void: _advance_or_decide(12, true))
+	_ui.skip_pressed.connect(func() -> void: _advance_or_decide(36, true))
 	_ui.buy_pressed.connect(_buy_selected)
-	_ui.listings_pressed.connect(_cycle_listing)
-	_ui.break_ground_pressed.connect(_break_ground)
+	_ui.approach_pressed.connect(_approach_selected)
+	_ui.offer_pressed.connect(_offer_selected)
+	_ui.walk_pressed.connect(_walk_selected)
+	_ui.accept_counter_pressed.connect(_accept_counter)
+	_ui.close_deal_pressed.connect(_close_selected)
+	_ui.loi_pressed.connect(_respond_loi)
+	_ui.list_pressed.connect(_list_selected)
+	_ui.delist_pressed.connect(_delist_selected)
+	_ui.accept_offer_pressed.connect(_accept_offer)
+	_ui.develop_pressed.connect(_develop_selected)
+	_ui.draw_pressed.connect(_draw_line)
+	_ui.repay_pressed.connect(_repay_line)
+	_ui.refi_pressed.connect(_refi_selected)
+	_ui.listing_chosen.connect(_focus_listing)
+	_ui.page_opened.connect(_on_page_opened)
+	_ui.break_ground_pressed.connect(_break_ground_opts)
+	_ui.continue_pressed.connect(_continue_campaign)
 	_ui.close_parcel_pressed.connect(func() -> void:
 		_selected = {}
 		_ui.hide_parcel())
-	_ui.owners_lens_pressed.connect(func(on: bool) -> void:
-		ContextGen.overlay = "owners" if on else ""
-		_rebuild())
+	_ui.lens_pressed.connect(_on_lens)
+	_ui.map_filter_pressed.connect(_on_map_filter)
+	_ui.attention_opened.connect(_on_attention)
 	_build_nav_widget(layer)
+	_refresh_resume()
+	if _campaign_dir != "":
+		_ui.set_playing(true)
+		_load_desks()
+	else:
+		_ui.set_playing(false)
 	_ui.set_status("generating city...")
 	await get_tree().process_frame
 	await _rebuild()
-	# Shipped zip with plat-econ beside the exe: start the game without F1.
-	if _should_auto_start_campaign():
-		await _break_ground()
-
-func _should_auto_start_campaign() -> bool:
-	return not _selftest and _campaign_dir == "" and not Engine.is_editor_hint() \
-			and _resolve_runner() != ""
 
 ## MapLibre NavigationControl analogue: compass resets bearing; +/− zoom.
 func _build_nav_widget(layer: CanvasLayer) -> void:
@@ -208,13 +240,20 @@ func _rebuild() -> void:
 	_busy = false
 	if _selftest:
 		await _run_selftest()
+	elif _uishot:
+		await _run_uishot()
+	elif _startshot:
+		await _run_startshot()
 
 ## Headless proof that the interactive path works: exercise the free-flow
 ## camera, the parcel card, a campaign advance and a buy, save frames, quit.
 func _run_selftest() -> void:
-	# One run only: the campaign-advance step below rebuilds the city, and a
-	# rebuild re-entering the selftest would loop forever.
+	# One run only: later steps refresh the city, and a rebuild that
+	# re-entered the selftest would loop forever.
 	_selftest = false
+	if _campaign_dir != "":
+		_ui.set_playing(true)
+		_load_desks()
 	# Camera proof: two framings the old band clamp would have rejected.
 	# Street — closer than the old near floor (70 m / 130 m), aimed at the
 	# downtown core so the frame is buildings, not the origin park.
@@ -266,34 +305,246 @@ func _run_selftest() -> void:
 			_pick_building(cam.unproject_position(world))
 			if _ui.is_parcel_visible():
 				print("[plat] selftest pick: ", _ui.parcel_debug_text())
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_glance.png")
 				break
 		if not _ui.is_parcel_visible():
 			printerr("[plat] selftest pick FAILED: no building card")
 	if _campaign_dir != "":
-		# The game loop itself, once: sim advances in node, city rebuilds.
+		# The game loop itself, once: sim advances in node, city refreshes.
 		var before := str(_hud_game.get("date", "?"))
 		var cash_a := float(_hud_game.get("cash", 0))
-		await _advance_campaign(3)
+		await _advance_campaign(1, false)
 		while _busy:
 			await get_tree().process_frame
 		print("[plat] selftest campaign advance: %s $%.2fM -> %s $%.2fM" % [
 				before, cash_a / 1e6,
 				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6])
-		# And a DEAL: buy the cheapest listed lot cash covers. Owners
-		# overlay on so the bought lot's gold marker is in the frame.
+		_ui.hide_page()
+		print("[plat] selftest inbox: yearOne=%s next=%s rungs=%s" % [
+				str(_hud_game.get("yearOne")), str(_hud_game.get("next", {})),
+				str(_hud_game.get("rungs", []))])
+		for i in range(8):
+			await get_tree().process_frame
+		await _save_frame("renders/ui_inbox.png")
+		_ui.open_page("market")
+		_on_page_opened("market")
+		print("[plat] selftest market: %d rows" % _market_rows.size())
+		for i in range(10):
+			await get_tree().process_frame
+		await _save_frame("renders/ui_market.png")
+		# The contract path: offer at ask → Deals desk → Close.
+		# Buy at ask remains the cash shortcut; this is the handshake.
 		var cash0 := float(_hud_game.get("cash", 0))
 		_pick_affordable_listing()
 		if not _selected.is_empty():
 			print("[plat] selftest listing: ", _ui.parcel_debug_text())
+			_ui.hide_page()
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_card.png")
 			ContextGen.overlay = "owners"
-			await _buy_selected()
+			await _offer_selected()
 			while _busy:
 				await get_tree().process_frame
-			print("[plat] selftest buy: cash $%.2fM -> $%.2fM, holdings %d" % [
+			print("[plat] selftest offer: cash $%.2fM -> $%.2fM, talks %d" % [
 					cash0 / 1e6, float(_hud_game.get("cash", 0)) / 1e6,
+					int((_deals.get("talks", []) as Array).size())])
+			_ui.open_page("deals")
+			_on_page_opened("deals")
+			for i in range(10):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_deals.png")
+			await _close_selected()
+			while _busy:
+				await get_tree().process_frame
+			print("[plat] selftest close: cash $%.2fM, holdings %d" % [
+					float(_hud_game.get("cash", 0)) / 1e6,
 					int(_hud_game.get("holdings", 0))])
 			if _ui.is_parcel_visible():
 				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
+			_ui.hide_page()
+			print("[plat] selftest inbox after lot: next=%s rungs=%s" % [
+					str(_hud_game.get("next", {})), str(_hud_game.get("rungs", []))])
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_map.png")
+			_ui.open_page("portfolio")
+			_on_page_opened("portfolio")
+			var port_n := 0
+			var tot: Variant = _portfolio.get("totals", {})
+			if tot is Dictionary:
+				port_n = int((tot as Dictionary).get("n", 0))
+			print("[plat] selftest portfolio: %d holdings" % port_n)
+			for i in range(10):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_portfolio.png")
+			_ui.open_page("economy")
+			_on_page_opened("economy")
+			print("[plat] selftest economy: %s" % str(_economy.get("phase", "?")))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_economy.png")
+			_ui.open_page("news")
+			_on_page_opened("news")
+			print("[plat] selftest news: %d items" % int((_news.get("items", []) as Array).size()))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_news.png")
+			_ui.open_page("debt")
+			_on_page_opened("debt")
+			print("[plat] selftest debt: line %s" % str(_debt.get("loc", {})))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_debt.png")
+			_ui.open_page("books")
+			_on_page_opened("books")
+			print("[plat] selftest books: cash %s" % str(_books.get("cash", 0)))
+			for i in range(8):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_books.png")
+			# A building with floors, then a letter. Vacant dirt has no roll.
+			var lot_bbl := str(_selected.get("bbl", ""))
+			_pick_affordable_commercial()
+			if not _selected.is_empty() and str(_selected.get("bbl", "")) != lot_bbl:
+				print("[plat] selftest commercial: ", _ui.parcel_debug_text())
+				await _offer_selected()
+				while _busy:
+					await get_tree().process_frame
+				await _close_selected()
+				while _busy:
+					await get_tree().process_frame
+				print("[plat] selftest commercial close: cash $%.2fM holdings %d next=%s" % [
+						float(_hud_game.get("cash", 0)) / 1e6,
+						int(_hud_game.get("holdings", 0)),
+						str(_hud_game.get("next", {}))])
+				await _advance_campaign(18, true)
+				while _busy:
+					await get_tree().process_frame
+				print("[plat] selftest wait letter: month %s letters %d" % [
+						str(_hud_game.get("date", "?")),
+						int((_leasing.get("letters", []) as Array).size())])
+				_ui.hide_page()
+				_ui.refresh_vitals(_hud_game, true)
+				_ui.show_next_decision()
+				print("[plat] selftest decision: ", _ui.decision_debug_text())
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_decision.png")
+				_ui.hide_decision()
+				_ui.open_page("leasing")
+				_on_page_opened("leasing")
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_leasing.png")
+				var lid := _first_letter_id()
+				if lid > 0:
+					await _respond_loi(lid, "accept")
+					while _busy:
+						await get_tree().process_frame
+					print("[plat] selftest accept letter %d: next=%s letters %d" % [
+							lid, str(_hud_game.get("next", {})),
+							int((_leasing.get("letters", []) as Array).size())])
+					_ui.open_page("leasing")
+					_on_page_opened("leasing")
+					for i in range(10):
+						await get_tree().process_frame
+					await _save_frame("renders/ui_leased.png")
+					_ui.open_page("property", "history")
+					_on_page_opened("property")
+					print("[plat] selftest deed history: ", _ui.property_debug_text())
+					for i in range(10):
+						await get_tree().process_frame
+					await _save_frame("renders/ui_history.png")
+					_ui.open_page("property", "money")
+					_on_page_opened("property")
+					print("[plat] selftest deed money: ", _ui.property_debug_text())
+					for i in range(10):
+						await get_tree().process_frame
+					await _save_frame("renders/ui_money.png")
+				else:
+					printerr("[plat] selftest letter FAILED: no LOI after advance")
+			else:
+				printerr("[plat] selftest commercial FAILED: no affordable office/retail")
+			if lot_bbl != "":
+				_focus_listing(lot_bbl)
+			# Draw the available line before Advance — idle cash above $250k
+			# sweeps it on the next month tick.
+			var loc0: Dictionary = _debt.get("loc", {})
+			var draw_amt := float(loc0.get("drawAmt", loc0.get("available", 0)))
+			if draw_amt > 0.0:
+				await _draw_line()
+				while _busy:
+					await get_tree().process_frame
+				_ui.open_page("debt")
+				_on_page_opened("debt")
+				print("[plat] selftest draw: line %s cash $%.2fM" % [
+						str(_debt.get("loc", {})),
+						float(_hud_game.get("cash", 0)) / 1e6])
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_drawn.png")
+			_ui.hide_page()
+			await _list_selected()
+			while _busy:
+				await get_tree().process_frame
+			print("[plat] selftest list: ", _ui.parcel_debug_text())
+			_ui.open_page("property", "sell")
+			_on_page_opened("property")
+			for i in range(10):
+				await get_tree().process_frame
+			await _save_frame("renders/ui_listed.png")
+			if str(_selected.get("cls", "")) == "land":
+				await _delist_selected()
+				while _busy:
+					await get_tree().process_frame
+				_ui.open_page("property", "build")
+				_on_page_opened("property")
+				print("[plat] selftest build options: %d" % _dev_options.size())
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_build.png")
+				_ui.open_page("property", "refi")
+				_on_page_opened("property")
+				print("[plat] selftest refi quotes: %d" % _refi_quotes.size())
+				for q in _refi_quotes:
+					if bool(q.get("available", false)):
+						print("[plat] selftest refi open: %s proceeds %s rate %s" % [
+								str(q.get("id")), str(q.get("proceeds")),
+								str(q.get("rate"))])
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_refi.png")
+				for q in _refi_quotes:
+					if not bool(q.get("available", false)):
+						continue
+					await _refi_selected(str(q.get("id", "")))
+					while _busy:
+						await get_tree().process_frame
+					print("[plat] selftest refi: product %s cash $%.2fM debt room %s" % [
+							str(q.get("id")), float(_hud_game.get("cash", 0)) / 1e6,
+							str(_debt.get("totals", {}))])
+					break
+			_pick_approachable()
+			if not _selected.is_empty() and not bool(_selected.get("held", false)):
+				print("[plat] selftest knock card: ", _ui.parcel_debug_text())
+				_ui.hide_page()
+				for i in range(8):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_knock.png")
+				await _approach_selected()
+				while _busy:
+					await get_tree().process_frame
+				print("[plat] selftest approach: ", _ui.parcel_debug_text())
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_approach.png")
+				_ui.open_page("property", "acquire")
+				_on_page_opened("property")
+				for i in range(10):
+					await get_tree().process_frame
+				await _save_frame("renders/ui_property.png")
 		else:
 			printerr("[plat] selftest buy FAILED: no affordable listing")
 	else:
@@ -305,6 +556,50 @@ func _run_selftest() -> void:
 	print("[plat] selftest OK -> ", ProjectSettings.globalize_path(
 			"res://renders/playable_selftest.png"))
 	get_tree().quit(0)
+
+## Honest current-chrome frame for docs/UI-PLAN.md. Downtown, listing on
+## the card, vitals populated. Not a claim that the desk is done.
+func _run_uishot() -> void:
+	_uishot = false
+	_help_visible = false
+	if city._import != null:
+		_g_target = city._import.core
+	_g_bearing = 210.0
+	_g_pitch = 56.0
+	_g_distance = 320.0
+	_snap()
+	for i in range(8):
+		await get_tree().process_frame
+	_ui.set_playing(true)
+	_load_desks()
+	_pick_affordable_listing()
+	if not _ui.is_parcel_visible() and city._import != null:
+		for b in city._import.buildings:
+			if b.get("listed", false) and not b.get("deco", false):
+				_show_card(b)
+				break
+	_ui.open_page("market")
+	_on_page_opened("market")
+	_update_hud()
+	for i in range(12):
+		await get_tree().process_frame
+	await _save_frame("renders/ui_current.png")
+	print("[plat] uishot OK -> ", ProjectSettings.globalize_path(
+			"res://renders/ui_current.png"))
+	get_tree().quit(0)
+
+
+func _run_startshot() -> void:
+	_startshot = false
+	_ui.set_playing(false)
+	_refresh_resume()
+	for i in range(10):
+		await get_tree().process_frame
+	await _save_frame("renders/ui_start.png")
+	print("[plat] startshot OK -> ", ProjectSettings.globalize_path(
+			"res://renders/ui_start.png"))
+	get_tree().quit(0)
+
 
 func _save_frame(rel: String) -> void:
 	await RenderingServer.frame_post_draw
@@ -500,11 +795,25 @@ func _load_game_hud() -> void:
 	var txt := FileAccess.get_file_as_string(_campaign_dir + "/hud.json")
 	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
 	_hud_game = doc if doc is Dictionary else {}
+	_load_desks()
+	if _ui != null:
+		_ui.refresh_vitals(_hud_game, true)
 
 ## Advance the CAMPAIGN: the simulation runs in node (the engine repo's
-## game-server), plat re-reads the files it wrote and rebuilds. The sim owns
-## the quantities; this view never computes one.
-func _advance_campaign(months: int) -> void:
+## game-server), plat re-reads the files it wrote. Massing is unchanged on
+## a month tick, so the city refreshes in place. The sim owns the
+## quantities; this view never computes one.
+func _advance_or_decide(months: int, until_attention: bool) -> void:
+	if _ui != null and _ui.is_decision_visible():
+		return
+	if _ui != null and _ui.show_next_decision():
+		return
+	await _advance_campaign(months, until_attention)
+	if _ui != null:
+		_ui.show_next_decision()
+
+
+func _advance_campaign(months: int, until_attention: bool = false) -> void:
 	if _busy or _campaign_dir == "":
 		return
 	_busy = true
@@ -516,17 +825,46 @@ func _advance_campaign(months: int) -> void:
 	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
 	if runner == "" or not FileAccess.file_exists(runner):
 		runner = _resolve_runner()
+	var args := PackedStringArray([runner, "advance", "--dir=" + _campaign_dir,
+			"--months=%d" % months])
+	if until_attention:
+		args.append("--until=attention")
 	var out := []
-	var ran: Array = _run_sim(PackedStringArray([runner, "advance", "--dir=" + _campaign_dir,
-			"--months=%d" % months]))
+	var ran: Array = _run_sim(args)
 	var code: int = ran[0]
 	out = ran[1]
 	_busy = false
 	if code != 0 or runner == "":
 		_ui.set_status("advance FAILED (%d): %s" % [code, "".join(out).right(200)])
 		return
+	await _refresh_live()
+
+## Re-read hud + parcel live fields. Remesh only when buildings3d changed
+## (a tower delivered). Overlay gold/green stays stale until the player
+## toggles a lens — that path already rebuilds.
+func _refresh_live() -> void:
 	_load_game_hud()
-	_rebuild()
+	if city == null or city._import == null or _city_file == "":
+		_refresh_open_page()
+		return
+	var t0 := Time.get_ticks_msec()
+	var remesh := city._import.refresh_parcels(_city_file)
+	print("[plat] live refresh remesh=%s in %d ms" % [str(remesh), Time.get_ticks_msec() - t0])
+	if remesh:
+		await _rebuild()
+		_refresh_open_page()
+		return
+	var keep := str(_selected.get("bbl", ""))
+	if keep != "" and city._import != null:
+		var found := false
+		for b in city._import.buildings:
+			if str(b.get("bbl", "")) == keep:
+				_show_card(b)
+				found = true
+				break
+		if not found:
+			_ui.hide_parcel()
+	_refresh_open_page()
 
 ## Pick the building under a screen point: ray against each imported
 ## building's extruded footprint box, nearest hit wins, refined by
@@ -575,7 +913,7 @@ func _pick_building(screen: Vector2) -> void:
 
 func _show_card(b: Dictionary) -> void:
 	_selected = b
-	_ui.show_parcel(b, _campaign_dir != "")
+	_ui.show_parcel(_enrich(b), _campaign_dir != "")
 
 
 ## Where the simulation lives: the plat-sim sidecar next to the executable,
@@ -621,9 +959,11 @@ func _resolve_runner() -> String:
 	var dev := "/workspace/plat-econ/tools/game-server.mjs"
 	return dev if FileAccess.file_exists(dev) else ""
 
-## BREAK GROUND (docs/GAME-PLAN.md phase 2, first cut): F1 founds a firm on
-## a fresh island and opens it as the live campaign.
 func _break_ground() -> void:
+	await _break_ground_opts("city", "village", 2500000)
+
+
+func _break_ground_opts(size: String, density: String, cash: int) -> void:
 	if _busy:
 		return
 	var runner := _resolve_runner()
@@ -635,29 +975,281 @@ func _break_ground() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var dir := ProjectSettings.globalize_path("user://campaigns/c%d" % (randi() % 1000000))
-	var out := []
 	var ran: Array = _run_sim(PackedStringArray([runner, "new", "--dir=" + dir,
-			"--seed=%d" % (randi() % 100000)]))
+			"--seed=%d" % (randi() % 100000),
+			"--size=" + size, "--density=" + density, "--cash=%d" % cash]))
 	var code: int = ran[0]
-	out = ran[1]
+	var out: Array = ran[1]
 	_busy = false
 	if code != 0:
 		_ui.show_error("Break ground failed", "".join(out).right(200))
 		return
+	_open_campaign(dir)
+
+
+func _continue_campaign(path: String) -> void:
+	if path == "" or not FileAccess.file_exists(path.path_join("city.json")):
+		return
+	_open_campaign(path)
+
+
+func _open_campaign(dir: String) -> void:
 	_campaign_dir = dir
 	_city_file = dir + "/city.json"
 	_engine_pick = -1
 	_load_game_hud()
+	_ui.set_playing(true)
 	_g_target = Vector2.ZERO
 	_snap()
 	_rebuild()
 
+
+func _load_desks() -> void:
+	if _campaign_dir == "" or _ui == null:
+		return
+	_market_rows = _desk_file("market").get("rows", [])
+	_portfolio = _desk_file("portfolio")
+	_news = _desk_file("news")
+	_economy = _desk_file("economy")
+	_debt = _desk_file("debt")
+	_books = _desk_file("books")
+	_map_desk = _desk_file("map")
+	_deals = _desk_file("deals")
+	_leasing = _desk_file("leasing")
+	_deeds = _desk_file("deeds")
+	_ui.set_map_hud(_map_desk)
+	_ui.set_leasing(_leasing)
+
+
+func _desk_file(name: String) -> Dictionary:
+	var txt := FileAccess.get_file_as_string(_campaign_dir + "/desks/" + name + ".json")
+	var doc: Variant = JSON.parse_string(txt) if not txt.is_empty() else null
+	return doc if doc is Dictionary else {}
+
+
+func _holding_row(bbl: String) -> Dictionary:
+	for r in _portfolio.get("rows", []):
+		if r is Dictionary and str(r.get("bbl", "")) == bbl:
+			return r
+	return {}
+
+
+func _deed_of(bbl: String) -> Dictionary:
+	if bbl == "":
+		return {}
+	var files: Variant = _deeds.get("files", {})
+	if files is Dictionary and (files as Dictionary).has(bbl):
+		var row: Variant = (files as Dictionary)[bbl]
+		return row if row is Dictionary else {}
+	return {}
+
+
+func _enrich(b: Dictionary) -> Dictionary:
+	var out := b.duplicate()
+	var talk := _talk_row(str(b.get("bbl", "")))
+	if not talk.is_empty():
+		out["talk"] = talk
+	var deed := _deed_of(str(b.get("bbl", "")))
+	if not deed.is_empty():
+		if deed.get("history") != null:
+			out["history"] = deed["history"]
+		if deed.get("money") != null:
+			out["money"] = deed["money"]
+	var row := _holding_row(str(b.get("bbl", "")))
+	if row.is_empty():
+		return out
+	out["held"] = true
+	if row.get("noi") != null:
+		out["noi"] = row["noi"]
+	if row.get("basis") != null:
+		out["basis"] = row["basis"]
+	if row.get("debt") != null:
+		out["debt"] = row["debt"]
+	if row.get("value") != null:
+		out["value"] = row["value"]
+	if row.get("occ") != null:
+		out["occ"] = row["occ"]
+	if row.get("listAsk") != null:
+		out["listAsk"] = row["listAsk"]
+	if row.get("offer") != null:
+		out["offer"] = row["offer"]
+	if row.get("listed") != null:
+		out["listed"] = int(row["listed"]) == 1
+	if row.get("ask") != null:
+		out["ask"] = row["ask"]
+	if row.get("developing") != null:
+		out["developing"] = int(row["developing"]) == 1
+	if row.get("jobUse") != null:
+		out["jobUse"] = row["jobUse"]
+	if row.get("jobFloors") != null:
+		out["jobFloors"] = row["jobFloors"]
+	return out
+
+
+func _talk_row(bbl: String) -> Dictionary:
+	if bbl == "":
+		return {}
+	for t in _deals.get("talks", []):
+		if t is Dictionary and str(t.get("bbl", "")) == bbl:
+			return t
+	return {}
+
+
+func _on_page_opened(page: String) -> void:
+	match page:
+		"market":
+			_ui.set_market_rows(_market_rows)
+		"deals":
+			_ui.set_deals(_deals)
+		"leasing":
+			_ui.set_leasing(_leasing)
+		"portfolio":
+			_ui.set_portfolio(_portfolio)
+		"news":
+			_ui.set_news(_news)
+		"economy":
+			_ui.set_economy(_economy)
+		"debt":
+			_ui.set_debt(_debt)
+		"books":
+			_ui.set_books(_books)
+		"property":
+			var card := _enrich(_selected) if not _selected.is_empty() else {}
+			_dev_options = []
+			_refi_quotes = []
+			if not card.is_empty() and bool(card.get("held", false)):
+				if str(card.get("cls", "")) == "land" \
+						and not bool(card.get("developing", false)) \
+						and not bool(card.get("listed", false)):
+					_dev_options = _fetch_develop_options(str(card.get("bbl", "")))
+				_refi_quotes = _fetch_refi_quotes(str(card.get("bbl", "")))
+			_ui.set_property_overview(card, _dev_options, _refi_quotes)
+		_:
+			_ui.set_page_note("This desk is next. The engine already has the numbers; the export is not wired yet.")
+
+
+func _on_lens(name: String, on: bool) -> void:
+	if name == "owners":
+		ContextGen.overlay = "owners" if on else ""
+	elif name == "listings":
+		ContextGen.overlay = "listings" if on else ""
+	else:
+		return
+	_rebuild()
+
+
+func _on_map_filter(name: String) -> void:
+	if name == "city":
+		ContextGen.overlay = ""
+	elif name == "book":
+		ContextGen.overlay = "owners"
+	elif name == "cranes":
+		ContextGen.overlay = "construction"
+	else:
+		return
+	_rebuild()
+
+
+func _on_attention(item: Dictionary) -> void:
+	var bbl := str(item.get("bbl", ""))
+	if bbl != "":
+		_focus_listing(bbl)
+
+
+func _focus_listing(bbl: String) -> void:
+	if city == null or city._import == null or bbl == "":
+		return
+	for b in city._import.buildings:
+		if str(b.get("bbl", "")) == bbl:
+			var c := (b["bbox"] as Rect2).get_center()
+			_g_target = c
+			_show_card(b)
+			return
+
+
+func _refresh_resume() -> void:
+	if _ui == null:
+		return
+	var root := ProjectSettings.globalize_path("user://campaigns")
+	var best := ""
+	var best_label := ""
+	var best_t := -1
+	var d := DirAccess.open(root)
+	if d:
+		d.list_dir_begin()
+		var name := d.get_next()
+		while name != "":
+			if d.current_is_dir() and not name.begins_with("."):
+				var hud_path := root.path_join(name).path_join("hud.json")
+				if FileAccess.file_exists(hud_path):
+					var t := int(FileAccess.get_modified_time(hud_path))
+					if t >= best_t:
+						var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(hud_path))
+						if doc is Dictionary:
+							best_t = t
+							best = root.path_join(name)
+							best_label = "%s · %s · %s" % [
+									str(doc.get("city", name)), str(doc.get("date", "")),
+									"$%.2fM" % (float(doc.get("cash", 0)) / 1e6)]
+			name = d.get_next()
+	_ui.set_resume(best, best_label)
+
 ## BUY the selected parcel at ask (docs/GAME-PLAN.md 3.2). The engine
 ## decides; its error string is shown verbatim — plat never re-prices.
-func _buy_selected() -> void:
+func _offer_selected() -> void:
 	if _busy or _campaign_dir == "" or _selected.is_empty():
 		return
 	if not _selected.get("listed", false) or _selected.get("held", false):
+		return
+	await _run_verb("offer", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _walk_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("walk", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _accept_counter() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("accept-counter", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _close_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("close", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _respond_loi(id: int, action: String) -> void:
+	if _busy or _campaign_dir == "" or id <= 0:
+		return
+	var act := "decline" if action == "decline" else "accept"
+	await _run_verb("respond-loi", PackedStringArray(["--id=%d" % id, "--action=" + act]))
+
+
+func _approach_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if _selected.get("held", false) or _selected.get("listed", false):
+		return
+	await _run_verb("approach", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _their_ask(b: Dictionary) -> float:
+	var ap: Variant = b.get("approach", {})
+	if ap is Dictionary:
+		return float((ap as Dictionary).get("ask", 0))
+	return 0.0
+
+
+func _buy_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if _selected.get("held", false):
+		return
+	if not _selected.get("listed", false) and _their_ask(_selected) <= 0.0:
 		return
 	var bbl := str(_selected.get("bbl", ""))
 	_busy = true
@@ -681,8 +1273,126 @@ func _buy_selected() -> void:
 		_ui.show_error("Buy failed", str((res as Dictionary).get("err", "?")) \
 				if res is Dictionary else "unknown error")
 		return
-	_load_game_hud()
-	_rebuild()
+	await _refresh_live()
+
+
+func _list_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	if not _selected.get("held", false):
+		return
+	await _run_verb("list", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _delist_selected() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("delist", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _accept_offer() -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("accept-offer", PackedStringArray(["--bbl=" + str(_selected.get("bbl", ""))]))
+
+
+func _develop_selected(use: String, floors: int) -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty():
+		return
+	await _run_verb("develop", PackedStringArray([
+			"--bbl=" + str(_selected.get("bbl", "")),
+			"--use=" + use, "--floors=%d" % floors]))
+
+
+func _draw_line() -> void:
+	if _busy or _campaign_dir == "":
+		return
+	var loc: Dictionary = _debt.get("loc", {})
+	var amt := int(round(float(loc.get("drawAmt", loc.get("available", 0)))))
+	if amt <= 0:
+		return
+	await _run_verb("draw", PackedStringArray(["--amt=%d" % amt]))
+
+
+func _repay_line() -> void:
+	if _busy or _campaign_dir == "":
+		return
+	var loc: Dictionary = _debt.get("loc", {})
+	var amt := int(round(float(loc.get("repayAmt", 0))))
+	if amt <= 0:
+		return
+	await _run_verb("repay", PackedStringArray(["--amt=%d" % amt]))
+
+
+func _refi_selected(product: String) -> void:
+	if _busy or _campaign_dir == "" or _selected.is_empty() or product == "":
+		return
+	await _run_verb("refi", PackedStringArray([
+			"--bbl=" + str(_selected.get("bbl", "")),
+			"--product=" + product]))
+
+
+func _fetch_refi_quotes(bbl: String) -> Array:
+	if _campaign_dir == "" or bbl == "":
+		return []
+	var runner := _resolve_runner()
+	if runner == "":
+		return []
+	_run_sim(PackedStringArray([runner, "refi-quotes", "--dir=" + _campaign_dir,
+			"--bbl=" + bbl]))
+	var doc: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/refi.json"))
+	if doc is Dictionary:
+		return (doc as Dictionary).get("quotes", [])
+	return []
+
+
+func _fetch_develop_options(bbl: String) -> Array:
+	if _campaign_dir == "" or bbl == "":
+		return []
+	var runner := _resolve_runner()
+	if runner == "":
+		return []
+	_run_sim(PackedStringArray([runner, "develop-options", "--dir=" + _campaign_dir,
+			"--bbl=" + bbl]))
+	var doc: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/options.json"))
+	if doc is Dictionary:
+		return (doc as Dictionary).get("options", [])
+	return []
+
+
+func _run_verb(op: String, extra: PackedStringArray) -> void:
+	_busy = true
+	_ui.set_status(op + "...")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var meta: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
+	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
+	if runner == "" or not FileAccess.file_exists(runner):
+		runner = _resolve_runner()
+	var args := PackedStringArray([runner, op, "--dir=" + _campaign_dir])
+	args.append_array(extra)
+	var ran: Array = _run_sim(args)
+	var code: int = ran[0]
+	_busy = false
+	if code != 0:
+		var res: Variant = JSON.parse_string(
+				FileAccess.get_file_as_string(_campaign_dir + "/result.json"))
+		_ui.show_error(op.capitalize() + " failed", str((res as Dictionary).get("err", "?")) \
+				if res is Dictionary else "unknown error")
+		return
+	await _refresh_live()
+
+
+func _refresh_open_page() -> void:
+	if _ui == null:
+		return
+	var page := _ui.current_page()
+	if page != "":
+		_on_page_opened(page)
+
 
 ## TAB walks the for-sale tape: camera flies to each listing, card shows it.
 func _cycle_listing() -> void:
@@ -699,6 +1409,51 @@ func _cycle_listing() -> void:
 	var c := (b["bbox"] as Rect2).get_center()
 	_g_target = c
 	_show_card(b)
+
+## Cheapest listed office/retail/industrial with vacancy. Multifamily
+## lets itself; dirt has no roll.
+func _pick_affordable_commercial() -> void:
+	if city == null or city._import == null:
+		return
+	var cash := float(_hud_game.get("cash", 0))
+	var best: Dictionary = {}
+	var best_occ := 2.0
+	var best_ask := 1e18
+	for b in city._import.buildings:
+		if not b.get("listed", false) or b.get("held", false) or b.get("deco", false):
+			continue
+		var cls := str(b.get("cls", ""))
+		if cls == "land" or cls == "multifamily":
+			continue
+		var ask := float(b.get("ask", 0.0))
+		if ask <= 0.0 or ask > cash:
+			continue
+		var occ := float(b.get("occ", 1.0))
+		if occ < 0.0:
+			occ = 1.0
+		if occ < best_occ or (is_equal_approx(occ, best_occ) and ask < best_ask):
+			best = b
+			best_occ = occ
+			best_ask = ask
+	if best.is_empty():
+		_selected = {}
+		return
+	var c := (best["bbox"] as Rect2).get_center()
+	_g_target = c
+	_target = c
+	_push()
+	_show_card(best)
+
+
+func _first_letter_id() -> int:
+	for l in _leasing.get("letters", []):
+		if l is Dictionary and int(l.get("id", 0)) > 0:
+			return int(l.get("id", 0))
+	for l in _deals.get("lois", []):
+		if l is Dictionary and int(l.get("id", 0)) > 0:
+			return int(l.get("id", 0))
+	return 0
+
 
 ## Cheapest listed lot the firm can actually pay for — the selftest deal.
 func _pick_affordable_listing() -> void:
@@ -722,6 +1477,42 @@ func _pick_affordable_listing() -> void:
 	_target = c
 	_push()
 	_show_card(best)
+
+
+func _pick_approachable() -> void:
+	if city == null or city._import == null:
+		return
+	var best: Dictionary = {}
+	var best_score := -1.0
+	for b in city._import.buildings:
+		if b.get("deco", false) or b.get("held", false) or b.get("listed", false):
+			continue
+		if str(b.get("bbl", "")) == "":
+			continue
+		var ap: Variant = b.get("approach", {})
+		if ap is Dictionary and not (ap as Dictionary).is_empty():
+			continue
+		var sf := float(b.get("sqft", 0.0))
+		if sf < 4000.0 or sf > 40000.0:
+			continue
+		var cls := str(b.get("cls", ""))
+		if cls == "land" or cls == "multifamily":
+			continue
+		# Prefer a mid-block office/retail a player would actually knock on,
+		# not the 260k-sf waterfront that always slams the door.
+		var score := 1.0 / (1.0 + absf(sf - 8000.0) / 8000.0)
+		if score > best_score:
+			best = b
+			best_score = score
+	if best.is_empty():
+		_selected = {}
+		return
+	var c := (best["bbox"] as Rect2).get_center()
+	_g_target = c
+	_target = c
+	_push()
+	_show_card(best)
+
 
 func _update_hud() -> void:
 	if city == null or city.rig == null or _ui == null:
@@ -749,6 +1540,7 @@ func _update_hud() -> void:
 				+ "\nV free-fly · C downtown · H toggle help · Esc quit")
 	_ui.set_help(help, _help_visible)
 	_ui.set_owners_lens(ContextGen.overlay == "owners")
+	_ui.set_listings_lens(ContextGen.overlay == "listings")
 	if _compass:
 		var br := city.rig.bearing()
 		_compass.text = "N\n%03d°" % int(fposmod(br, 360.0))
@@ -856,8 +1648,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_cycle_listing()
 			KEY_SPACE:
 				# The game key: a season passes, the sim decides what
-				# changed, the city rebuilds to show it.
-				_advance_campaign(3)
+				# changed, the city refreshes to show it.
+				_advance_or_decide(1, false)
 			KEY_ESCAPE:
 				get_tree().quit()
 
