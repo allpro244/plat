@@ -81,6 +81,7 @@ func _ready() -> void:
 		add_child(ImportGen.build(_import,
 				_ground_material("asphalt", Color(0.155, 0.155, 0.16), 0.92, 6.0), walk))
 		add_child(ContextGen.build_imported(_import, _matlib, night))
+		refresh_cranes()
 	if _import == null and not params.get("no_block", false):
 		_build_block()
 	if _plan != null:
@@ -102,6 +103,22 @@ func _ready() -> void:
 	if params["cam_azimuth"] == null:
 		params["cam_azimuth"] = fposmod(sun_info["azimuth_deg"] - 50.0, 360.0)
 	rig.set_view(params["cam_azimuth"], params["cam_height"], params["cam_radius"])
+
+
+## Tower cranes on lots the sim has under construction. A thin node so a
+## develop verb can raise one without remeshing the city (massing is unchanged
+## until delivery).
+func refresh_cranes() -> void:
+	var old := get_node_or_null("cranes")
+	if old != null:
+		remove_child(old)
+		old.free()
+	if _import == null:
+		return
+	var n := ImportGen.build_cranes(_import)
+	n.name = "cranes"
+	add_child(n)
+
 
 func _build_environment() -> void:
 	var env := Environment.new()

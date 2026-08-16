@@ -42,6 +42,7 @@ export_presets.cfg
 !/renders/ui_knock.png
 !/renders/ui_approach.png
 !/renders/ui_property.png
+!/renders/crane_site.png
 
 # Local checkout of the economy engine (dev path main.gd expects).
 # Public repo; clone it beside plat, do not commit it here.
