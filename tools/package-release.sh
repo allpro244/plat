@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Build double-click zips: plat + portable node + plat-econ. No Godot install
-# needed on the player's machine.
+# Build double-click zips: plat + plat-sim. No Godot or Node install on the
+# player's machine. The economy is the SEA sidecar, not a plat-econ tree.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION="${1:-dev}"
-NODE_VER="22.14.0"
 DIST="dist/releases"
 mkdir -p "$DIST"
 
 echo "== assets =="
 bash tools/fetch-assets.sh
+
+echo "== plat-sim sidecar =="
+bash tools/build-plat-sim.sh linux,windows
 
 echo "== godot export templates =="
 TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.5.stable"
@@ -34,35 +36,18 @@ godot --headless --export-release "Windows Desktop" dist/plat-windows/plat.exe
 godot --headless --export-release "Linux" dist/plat-linux/plat.x86_64
 chmod +x dist/plat-linux/plat.x86_64
 
-echo "== plat-econ =="
-if [ ! -d plat-econ/.git ]; then
-  rm -rf plat-econ
-  git clone --depth 1 https://github.com/allpro244/plat-econ.git plat-econ
-fi
-if [ ! -f plat-econ/test/.engine.mjs ]; then
-  (
-    cd plat-econ
-    export CI=true
-    corepack enable 2>/dev/null || true
-    corepack prepare pnpm@10.33.3 --activate 2>/dev/null || true
-    pnpm install --frozen-lockfile
-    pnpm engine
-  )
-fi
-# Desk exports + richer HUD live in plat until plat-econ merges them.
-cp -a tools/runner/citydoc.mjs plat-econ/tools/citydoc.mjs
-cp -a tools/runner/game-server.mjs plat-econ/tools/game-server.mjs
-
 write_play_txt() {
   cat > "$1/PLAY.txt" <<'EOF'
 PLAT — Broadway & Wall in 3D
 
 1. Double-click plat.exe (Windows) or plat.x86_64 (Linux).
+   Keep plat-sim / plat-sim.exe in the same folder — that is the economy.
 2. Wait ~10 seconds while the city and your firm load.
 3. Break ground (or Continue). Click Acquire for the marketplace tape.
 4. Click a listing or a building, then Buy at ask. Advance moves a month.
 
-Left-drag pans.  Right-drag rotates.  Mouse wheel zooms.
+No Godot install. No Node install. Left-drag pans. Right-drag rotates.
+Mouse wheel zooms.
 EOF
 }
 
@@ -71,17 +56,8 @@ pack_windows() {
   rm -rf "$dir"
   mkdir -p "$dir"
   cp dist/plat-windows/plat.exe "$dir/"
+  cp dist/plat-sim.exe "$dir/"
   write_play_txt "$dir"
-  tmp=$(mktemp -d)
-  curl -fsSL -o "$tmp/node.zip" \
-    "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-win-x64.zip"
-  unzip -qo "$tmp/node.zip" -d "$tmp"
-  cp "$tmp/node-v${NODE_VER}-win-x64/node.exe" "$dir/"
-  rm -rf "$tmp"
-  rm -rf "$dir/plat-econ"
-  mkdir -p "$dir/plat-econ"
-  cp -a plat-econ/. "$dir/plat-econ/"
-  rm -rf "$dir/plat-econ/.git"
   (cd "$DIST" && zip -qr "plat-win64-${VERSION}.zip" "plat-win64")
   echo "Wrote $DIST/plat-win64-${VERSION}.zip"
 }
@@ -91,17 +67,9 @@ pack_linux() {
   rm -rf "$dir"
   mkdir -p "$dir"
   cp dist/plat-linux/plat.x86_64 "$dir/"
+  cp dist/plat-sim "$dir/"
+  chmod +x "$dir/plat-sim"
   write_play_txt "$dir"
-  tmp=$(mktemp -d)
-  curl -fsSL -o "$tmp/node.tar.xz" \
-    "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-linux-x64.tar.xz"
-  tar -xJf "$tmp/node.tar.xz" -C "$tmp"
-  cp "$tmp/node-v${NODE_VER}-linux-x64/bin/node" "$dir/"
-  rm -rf "$tmp"
-  rm -rf "$dir/plat-econ"
-  mkdir -p "$dir/plat-econ"
-  cp -a plat-econ/. "$dir/plat-econ/"
-  rm -rf "$dir/plat-econ/.git"
   (cd "$DIST" && zip -qr "plat-linux64-${VERSION}.zip" "plat-linux64")
   echo "Wrote $DIST/plat-linux64-${VERSION}.zip"
 }

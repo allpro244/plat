@@ -2,6 +2,7 @@
 //
 //   node tools/game-server.mjs new --seed=1928 --density=village --dir=camp/
 //   node tools/game-server.mjs advance --dir=camp/ --months=3
+//   ./plat-sim new --dir=camp/          (Node SEA sidecar — docs/GAME-PLAN.md phase 1)
 //
 // A campaign directory holds the whole game on disk:
 //   campaign.json ... seed / size / density (city identity — never changes)
@@ -13,23 +14,26 @@
 // runs HERE, in node — the renderer (plat, the web app, anything) reads the
 // files and issues commands. Deterministic: same campaign + same commands,
 // byte-identical files.
+//
+// The engine import is static so esbuild can inline it into one CJS blob
+// (tools/build-plat-sim.sh). `pnpm engine` must have written test/.engine.mjs.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeCity, PROCEDURAL, DEFAULT_SIZE } from "../src/citygen/index.mjs";
 import { buildCityDoc, hudOf, writeDesks } from "./citydoc.mjs";
+import * as Engine from "../test/.engine.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const bundle = join(HERE, "..", "test", ".engine.mjs");
-if (!globalThis.__PLAT_ENGINE && !existsSync(bundle)) {
-  console.error("no engine bundle — run `pnpm engine` first");
-  process.exit(1);
-}
-const E = globalThis.__PLAT_ENGINE ?? await import(bundle);
+const E = globalThis.__PLAT_ENGINE ?? Engine;
 
-const cmd = process.argv[2];
+// node tools/game-server.mjs CMD …  → argv[1] is the script
+// ./plat-sim CMD …                  → argv[1] is the command (SEA has no script path)
+const userArgv = /\.(mjs|cjs|js)$/.test(process.argv[1] ?? "")
+  ? process.argv.slice(2)
+  : process.argv.slice(1);
+const cmd = userArgv[0];
 const arg = (name, dflt) => {
-  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  const hit = userArgv.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.split("=").slice(1).join("=") : dflt;
 };
 const dir = arg("dir", "campaign");
@@ -75,9 +79,11 @@ if (cmd === "new") {
     density: arg("density", "village"),
   };
   mkdirSync(dir, { recursive: true });
-  // The runner records its own location so a front-end that only knows the
-  // campaign directory (plat's game view) can find the sim to drive it.
-  meta.runner = fileURLToPath(import.meta.url);
+  // Record the .mjs path so a front-end that only knows the campaign
+  // directory can find the sim. Empty inside the SEA sidecar — plat then
+  // looks for plat-sim beside its own executable.
+  const script = process.argv[1] ?? "";
+  meta.runner = /\.(mjs|cjs|js)$/.test(script) ? fileURLToPath(import.meta.url) : "";
   const cash0 = Math.max(0, parseInt(arg("cash", "2500000"), 10) || 2500000);
   meta.cash0 = cash0;
   writeFileSync(join(dir, "campaign.json"), JSON.stringify(meta));
@@ -420,6 +426,6 @@ if (cmd === "new") {
   writeAll(meta, city, g);
   console.log(`${action.toUpperCase()} LOI ${id}${r.msg ? " — " + r.msg : ""}`);
 } else {
-  console.error("usage: game-server.mjs new|advance|buy|list|delist|accept-offer|offer|walk|accept-counter|close|respond-loi|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
+  console.error("usage: plat-sim new|advance|buy|list|delist|accept-offer|offer|walk|accept-counter|close|respond-loi|draw|repay|refi-quotes|refi|develop-options|develop --dir=D");
   process.exit(1);
 }

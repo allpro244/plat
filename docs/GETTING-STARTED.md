@@ -1,8 +1,8 @@
 # Getting started (no prior Godot experience)
 
-plat is not a normal “double-click an .exe” game yet. It is a **Godot project** —
-a folder of code that the Godot program opens and runs. The economy (cash, buys,
-dates) lives in a **second repo** called plat-econ.
+A tagged **release zip** is the double-click path: `plat.exe` + `plat-sim.exe`
+in one folder, no Godot, no Node. This page is the **dev** path — you are
+opening the Godot project and driving plat-econ from source.
 
 You need three installs once, then two folders on disk.
 

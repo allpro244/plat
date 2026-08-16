@@ -22,7 +22,10 @@ arithmetic in a shader (floors × bays at stated sizes), not a texture.
 
 ## Playing it
 
-On a machine with a GPU:
+A tagged release zip is `plat.exe` + `plat-sim.exe` (or the Linux pair).
+Unzip, read `PLAY.txt`, double-click. No Godot or Node install — `plat-sim`
+is the economy, built by `tools/build-plat-sim.sh`. This section is the
+**dev** path, on a machine with a GPU:
 
 ```sh
 git clone <this repo> && cd plat
@@ -108,7 +111,7 @@ azimuth/elevation, camera band/position) so any image is reproducible.
 | `src/city/facade.gdshader` | dimensional window grid over the scanned wall set |
 | `src/city_scene.gd` | assembles env/sky/sun/ground/block/camera from params |
 | `src/shoot.gd` | headless entry: build, settle, save PNG, print params, quit |
-| `tools/` | setup, pinned asset fetch, headless shoot |
+| `tools/` | setup, pinned asset fetch, headless shoot, `build-plat-sim.sh` |
 
 ## Notes for this environment
 

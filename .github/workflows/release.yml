@@ -40,6 +40,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "${{ github.repository }}" \
             --title "plat ${GITHUB_REF_NAME}" \
-            --notes "Double-click download — unzip, open PLAY.txt, run plat.exe (Windows) or plat.x86_64 (Linux). No Godot or Node install needed." \
+            --notes "Double-click download — unzip, open PLAY.txt, run plat.exe (Windows) or plat.x86_64 (Linux). Ships plat-sim (the economy). No Godot or Node install needed." \
             "dist/releases/plat-win64-${VER}.zip" \
             "dist/releases/plat-linux64-${VER}.zip"
