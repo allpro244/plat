@@ -52,22 +52,17 @@ ESBUILD="plat-econ/node_modules/.bin/esbuild"
   --format=cjs \
   --outfile="$DIST/plat-sim.cjs" \
   --legal-comments=none
-# SEA wants CommonJS. Code cache is V8/arch-specific — one blob for both OSes.
-cat > "$DIST/sea-config.json" <<EOF
-{
-  "main": "$(pwd)/$DIST/plat-sim.cjs",
-  "output": "$(pwd)/$DIST/sea-prep.blob",
-  "disableExperimentalSEAWarning": true,
-  "useSnapshot": false,
-  "useCodeCache": false
-}
-EOF
-node --experimental-sea-config "$DIST/sea-config.json"
-
 inject() {
   local dest="$1"
   npx --yes "postject@${POSTJECT_VER}" "$dest" NODE_SEA_BLOB "$DIST/sea-prep.blob" \
     --sentinel-fuse "$FUSE"
+  # postject flips the last character of the fuse from 0 to 1. If that
+  # did not happen the binary is still a stock node and SEA dies with
+  # v8::ToLocalChecked Empty MaybeLocal.
+  if ! grep -a -q "${FUSE}:1" "$dest"; then
+    echo "SEA fuse not flipped in $dest" >&2
+    exit 1
+  fi
 }
 
 fetch_node() {
@@ -96,9 +91,25 @@ fetch_node() {
   fi
 }
 
+# The blob must be prepared by the same Node version that receives it.
+# CI's setup-node "22" is often newer than NODE_VER; a mismatched blob
+# crashes SEA with v8::ToLocalChecked Empty MaybeLocal.
+echo "== sea blob (node v${NODE_VER}) =="
+SEA_NODE="$(fetch_node linux-x64)"
+cat > "$DIST/sea-config.json" <<EOF
+{
+  "main": "$(pwd)/$DIST/plat-sim.cjs",
+  "output": "$(pwd)/$DIST/sea-prep.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": false
+}
+EOF
+"$SEA_NODE" --experimental-sea-config "$DIST/sea-config.json"
+
 if want linux; then
   echo "== plat-sim (linux-x64) =="
-  src="$(fetch_node linux-x64)"
+  src="$SEA_NODE"
   cp "$src" "$DIST/plat-sim"
   chmod +x "$DIST/plat-sim"
   inject "$DIST/plat-sim"
