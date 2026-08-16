@@ -1082,6 +1082,8 @@ func _enrich(b: Dictionary) -> Dictionary:
 		out["ask"] = row["ask"]
 	if row.get("developing") != null:
 		out["developing"] = int(row["developing"]) == 1
+	if row.get("devFloors") != null:
+		out["devFloors"] = int(row["devFloors"])
 	if row.get("jobUse") != null:
 		out["jobUse"] = row["jobUse"]
 	if row.get("jobFloors") != null:
