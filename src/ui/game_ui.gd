@@ -670,11 +670,19 @@ func set_inbox(items: Array, year_one: bool = false, months_left: int = 0, next:
 		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		BwTheme.style_label(hint, 12, false, true)
 		_inbox_body.add_child(hint)
-		var page := str(next.get("page", "market")) if not next.is_empty() else "market"
-		var go := _lens("Acquire" if page == "market" else "Open", false)
-		go.pressed.connect(func() -> void: open_page(page))
-		_inbox_body.add_child(go)
-		_inbox.offset_bottom = 232
+		var note := str(next.get("note", "")) if not next.is_empty() else ""
+		if note != "":
+			var sub := Label.new()
+			sub.text = note
+			sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			BwTheme.style_label(sub, 12, false, true)
+			_inbox_body.add_child(sub)
+		if not next.is_empty():
+			var page := str(next.get("page", "market"))
+			var go := _lens("Acquire" if page == "market" else "Open", false)
+			go.pressed.connect(func() -> void: open_page(page))
+			_inbox_body.add_child(go)
+		_inbox.offset_bottom = 232 + (40 if note != "" else 0)
 		_place_map_hud()
 		return
 	for it in items:

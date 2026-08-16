@@ -499,7 +499,9 @@ what to do, and a room owns the screen.
 
 - Year-one inbox reads the engine's next milestone (`MILESTONES.test`),
   not "Nothing waiting." Months left are `12 - month`. The button
-  routes to the desk that milestone lives on.
+  routes to the desk that milestone lives on. After January 2001 the
+  tape stops. `lease1` does not count inherited paper; vacant dirt
+  has no roll, so the note says so and Acquire stays on the tape.
 - Map HUD under the inbox: deliveries, balloons inside 18 months,
   City / Book / Cranes filters. Book is the owners overlay; Cranes
   tints jobs under construction. Numbers come from `desks/map.json`.

@@ -86,7 +86,7 @@ export function hudOf(E, city, g) {
     occN++;
   }
   const { nw, line, cf, book, attn } = readVitals(E, city, g);
-  const yo = yearOneOf(E, g, nw);
+  const yo = yearOneOf(E, city, g, nw);
   return {
     city: city.name,
     firm: g.firmName ?? "your firm",
@@ -121,24 +121,51 @@ const YEAR_ONE_IDS = ["deed1", "lease1", "tower1", "exit1", "nw25"];
 
 function milestonePage(id) {
   if (id === "deed1") return "market";
+  if (id === "lease1") return "leasing";
   return "portfolio";
 }
 
-/** Next year-one rung. The engine's test function decides; we paint the label. */
-function yearOneOf(E, g, nw) {
+/** A holding with floors. Vacant dirt has no roll — lease1 cannot fire on it. */
+function holdingHasFloors(E, city, g) {
+  for (const bbl of Object.keys(g.holdings ?? {})) {
+    const rec = E.resolveRec?.(city?.parcels, g, bbl);
+    if (rec && rec.class !== "land" && Number(rec.floors ?? rec.bldgArea ?? 0) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Next year-one rung. The engine's test function decides; we paint the label.
+ *  After January 2001 the year-one tape is over — do not nag a rung that
+ *  can no longer be the year's work. lease1 does not count inherited paper
+ *  (engine: t.startM > h.boughtM); we say so instead of sending dirt to
+ *  the portfolio room. */
+function yearOneOf(E, city, g, nw) {
   const month = g.month ?? 0;
-  const yearOne = month < 12;
+  if (month >= 12) {
+    return { yearOne: false, monthsLeft: 0, next: null };
+  }
   let next = null;
   try {
     for (const m of (E.MILESTONES ?? [])) {
       if (!YEAR_ONE_IDS.includes(m.id)) continue;
       if (typeof m.test === "function" && !m.test(g, nw ?? 0)) {
         next = { id: m.id, label: m.label, page: milestonePage(m.id) };
+        if (m.id === "lease1") {
+          if (!holdingHasFloors(E, city, g)) {
+            next.page = "market";
+            next.note = "Buy a building. Vacant dirt has no roll.";
+          } else {
+            next.page = "leasing";
+            next.note = "A new tenant, after you bought. Renewing inherited paper does not count.";
+          }
+        }
         break;
       }
     }
   } catch { /* */ }
-  return { yearOne, monthsLeft: yearOne ? Math.max(0, 12 - month) : 0, next };
+  return { yearOne: true, monthsLeft: Math.max(0, 12 - month), next };
 }
 
 function readVitals(E, city, g) {

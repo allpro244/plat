@@ -248,8 +248,8 @@ func _rebuild() -> void:
 ## Headless proof that the interactive path works: exercise the free-flow
 ## camera, the parcel card, a campaign advance and a buy, save frames, quit.
 func _run_selftest() -> void:
-	# One run only: the campaign-advance step below rebuilds the city, and a
-	# rebuild re-entering the selftest would loop forever.
+	# One run only: later steps refresh the city, and a rebuild that
+	# re-entered the selftest would loop forever.
 	_selftest = false
 	if _campaign_dir != "":
 		_ui.set_playing(true)
@@ -312,7 +312,7 @@ func _run_selftest() -> void:
 		if not _ui.is_parcel_visible():
 			printerr("[plat] selftest pick FAILED: no building card")
 	if _campaign_dir != "":
-		# The game loop itself, once: sim advances in node, city rebuilds.
+		# The game loop itself, once: sim advances in node, city refreshes.
 		var before := str(_hud_game.get("date", "?"))
 		var cash_a := float(_hud_game.get("cash", 0))
 		await _advance_campaign(1, false)
@@ -364,7 +364,7 @@ func _run_selftest() -> void:
 			if _ui.is_parcel_visible():
 				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
 			_ui.hide_page()
-			print("[plat] selftest inbox after buy: next=%s" % str(_hud_game.get("next", {})))
+			print("[plat] selftest inbox after lot: next=%s" % str(_hud_game.get("next", {})))
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_map.png")
@@ -413,9 +413,10 @@ func _run_selftest() -> void:
 				await _close_selected()
 				while _busy:
 					await get_tree().process_frame
-				print("[plat] selftest commercial close: cash $%.2fM holdings %d" % [
+				print("[plat] selftest commercial close: cash $%.2fM holdings %d next=%s" % [
 						float(_hud_game.get("cash", 0)) / 1e6,
-						int(_hud_game.get("holdings", 0))])
+						int(_hud_game.get("holdings", 0)),
+						str(_hud_game.get("next", {}))])
 				await _advance_campaign(18, true)
 				while _busy:
 					await get_tree().process_frame
@@ -797,8 +798,9 @@ func _load_game_hud() -> void:
 		_ui.refresh_vitals(_hud_game, true)
 
 ## Advance the CAMPAIGN: the simulation runs in node (the engine repo's
-## game-server), plat re-reads the files it wrote and rebuilds. The sim owns
-## the quantities; this view never computes one.
+## game-server), plat re-reads the files it wrote. Massing is unchanged on
+## a month tick, so the city refreshes in place. The sim owns the
+## quantities; this view never computes one.
 func _advance_or_decide(months: int, until_attention: bool) -> void:
 	if _ui != null and _ui.is_decision_visible():
 		return
@@ -833,8 +835,34 @@ func _advance_campaign(months: int, until_attention: bool = false) -> void:
 	if code != 0 or runner == "":
 		_ui.set_status("advance FAILED (%d): %s" % [code, "".join(out).right(200)])
 		return
+	await _refresh_live()
+
+## Re-read hud + parcel live fields. Remesh only when buildings3d changed
+## (a tower delivered). Overlay gold/green stays stale until the player
+## toggles a lens — that path already rebuilds.
+func _refresh_live() -> void:
 	_load_game_hud()
-	_rebuild()
+	if city == null or city._import == null or _city_file == "":
+		_refresh_open_page()
+		return
+	var t0 := Time.get_ticks_msec()
+	var remesh := city._import.refresh_parcels(_city_file)
+	print("[plat] live refresh remesh=%s in %d ms" % [str(remesh), Time.get_ticks_msec() - t0])
+	if remesh:
+		await _rebuild()
+		_refresh_open_page()
+		return
+	var keep := str(_selected.get("bbl", ""))
+	if keep != "" and city._import != null:
+		var found := false
+		for b in city._import.buildings:
+			if str(b.get("bbl", "")) == keep:
+				_show_card(b)
+				found = true
+				break
+		if not found:
+			_ui.hide_parcel()
+	_refresh_open_page()
 
 ## Pick the building under a screen point: ray against each imported
 ## building's extruded footprint box, nearest hit wins, refined by
@@ -1143,6 +1171,7 @@ func _refresh_resume() -> void:
 	var root := ProjectSettings.globalize_path("user://campaigns")
 	var best := ""
 	var best_label := ""
+	var best_t := -1
 	var d := DirAccess.open(root)
 	if d:
 		d.list_dir_begin()
@@ -1151,12 +1180,15 @@ func _refresh_resume() -> void:
 			if d.current_is_dir() and not name.begins_with("."):
 				var hud_path := root.path_join(name).path_join("hud.json")
 				if FileAccess.file_exists(hud_path):
-					var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(hud_path))
-					if doc is Dictionary:
-						best = root.path_join(name)
-						best_label = "%s · %s · %s" % [
-								str(doc.get("city", name)), str(doc.get("date", "")),
-								"$%.2fM" % (float(doc.get("cash", 0)) / 1e6)]
+					var t := int(FileAccess.get_modified_time(hud_path))
+					if t >= best_t:
+						var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(hud_path))
+						if doc is Dictionary:
+							best_t = t
+							best = root.path_join(name)
+							best_label = "%s · %s · %s" % [
+									str(doc.get("city", name)), str(doc.get("date", "")),
+									"$%.2fM" % (float(doc.get("cash", 0)) / 1e6)]
 			name = d.get_next()
 	_ui.set_resume(best, best_label)
 
@@ -1239,9 +1271,7 @@ func _buy_selected() -> void:
 		_ui.show_error("Buy failed", str((res as Dictionary).get("err", "?")) \
 				if res is Dictionary else "unknown error")
 		return
-	_load_game_hud()
-	_rebuild()
-	_refresh_open_page()
+	await _refresh_live()
 
 
 func _list_selected() -> void:
@@ -1351,9 +1381,7 @@ func _run_verb(op: String, extra: PackedStringArray) -> void:
 		_ui.show_error(op.capitalize() + " failed", str((res as Dictionary).get("err", "?")) \
 				if res is Dictionary else "unknown error")
 		return
-	_load_game_hud()
-	_rebuild()
-	_refresh_open_page()
+	await _refresh_live()
 
 
 func _refresh_open_page() -> void:
@@ -1618,7 +1646,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_cycle_listing()
 			KEY_SPACE:
 				# The game key: a season passes, the sim decides what
-				# changed, the city rebuilds to show it.
+				# changed, the city refreshes to show it.
 				_advance_or_decide(1, false)
 			KEY_ESCAPE:
 				get_tree().quit()
