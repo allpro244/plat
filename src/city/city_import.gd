@@ -185,7 +185,8 @@ static func stamp_live(b: Dictionary, par: Dictionary) -> void:
 	b["approach"] = par.get("approach", {})
 
 ## Re-read city.json onto the existing building records. Returns true when
-## buildings3d massing changed and the city must remesh (a tower delivered).
+## a volume's massing changed (a tower delivered). Volumes pair by import
+## order: one BBL can be several masses.
 func refresh_parcels(path: String) -> bool:
 	var txt := FileAccess.get_file_as_string(path)
 	if txt.is_empty():
@@ -194,24 +195,31 @@ func refresh_parcels(path: String) -> bool:
 	if not (doc is Dictionary) or str(doc.get("format", "")) != "plat-city/1":
 		return false
 	var parcels: Dictionary = doc.get("parcels", {})
-	var b3s: Array = doc.get("buildings3d", [])
-	if b3s.size() != buildings.size():
+	var live: Array = []
+	for raw in doc.get("buildings3d", []):
+		if not (raw is Dictionary):
+			continue
+		# Same skip as load_city: a ring under 3 points never became a volume.
+		if ((raw as Dictionary).get("r", []) as Array).size() < 3:
+			continue
+		live.append(raw)
+	# Pair by import order, not BBL. One parcel can be several volumes
+	# (setback, annex, deco). Last-write-wins on BBL compared a 9 m
+	# podium to a 51 m tower and remeshed every month.
+	if live.size() != buildings.size():
 		return true
-	var by_bbl: Dictionary = {}
-	for raw in b3s:
-		if raw is Dictionary:
-			by_bbl[str((raw as Dictionary).get("b", ""))] = raw
-	for b in buildings:
-		var bbl := str(b.get("bbl", ""))
-		var b3: Variant = by_bbl.get(bbl, {})
-		if not (b3 is Dictionary) or (b3 as Dictionary).is_empty():
+	for i in range(buildings.size()):
+		var rec: Dictionary = live[i]
+		var b: Dictionary = buildings[i]
+		if str(rec.get("b", "")) != str(b.get("bbl", "")):
 			return true
-		var rec: Dictionary = b3
-		if float(rec.get("z1", b["z1"])) != float(b["z1"]) \
+		if absf(float(rec.get("z1", b["z1"])) - float(b["z1"])) > 0.05 \
 				or int(rec.get("f", b["floors"])) != int(b["floors"]) \
 				or str(rec.get("c", b["cls"])) != str(b["cls"]):
 			return true
-		stamp_live(b, parcels.get(bbl, {}))
+		var bbl := str(b.get("bbl", ""))
+		if bbl != "":
+			stamp_live(b, parcels.get(bbl, {}))
 	return false
 
 ## All rings of one GeoJSON polygon, holes subtracted (clip returns the
