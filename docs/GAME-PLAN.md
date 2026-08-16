@@ -13,11 +13,15 @@ engine through the campaign runner. Nothing below moves a number into GDScript.
 
 ## What exists today (the foundation this builds on)
 
-- Campaign runner (`plat-econ/tools/game-server.mjs`): `new` / `advance` on a
-  JSON campaign dir; GameState proven JSON-round-trip safe; city.json carries
-  live occupancy and `held` flags; hud.json carries firm/date/cash.
+- Campaign runner (`plat-econ/tools/game-server.mjs`, overlaid from
+  `tools/runner/`): the year-one verb surface on a JSON campaign dir.
+  GameState proven JSON-round-trip safe; city.json carries live occupancy
+  and `held` flags; hud.json carries firm/date/cash.
+- `plat-sim` / `plat-sim.exe`: Node SEA sidecar (`tools/build-plat-sim.sh`).
+  The shipped zip is `plat.exe` + `plat-sim.exe`. Dev still shells
+  `node` + the `.mjs`.
 - plat opens engine cities by default, `--campaign=` mode shows the firm HUD,
-  SPACE advances a season through a real node round-trip.
+  SPACE advances a month through the sidecar (or `node` + the `.mjs` in dev).
 - The parcel card: click a building, read BBL / class / district / sqft /
   floors / year / occupancy (selftest-proven, in the shipped build).
 - The full BW web UI runs in plat-econ (`pnpm dev`) — the reference
@@ -26,19 +30,23 @@ native Godot port is specified in `docs/UI-PLAN.md`: mouse-first, jobs
 and desk rooms, glance card vs parchment page. Do not implement chrome
 that the plan has not reached.
 
-## Phase 1 — The sim ships inside the game (no Node install)
+## Phase 1 — The sim ships inside the game (no Node install) — done
 
-The blocker for "one download": today the campaign runner needs Node. Fix by
-compiling the engine + runner into a single sidecar executable.
+The campaign runner + engine compile into one sidecar. Stock Node SEA, no
+new runtime.
 
-- `plat-econ`: esbuild-bundle `game-server.mjs` + engine into one self-
-  contained script; produce `plat-sim.exe` / `plat-sim` via Node's Single
-  Executable Application (SEA) blob (no new runtime dependencies — SEA is
-  stock Node tooling). CI builds it next to the gate.
-- plat looks for the sidecar NEXT TO its own executable first, then falls
-  back to `node` + recorded runner path (dev flow unchanged).
-- Ship = `plat.exe` + `plat-sim.exe` in one zip. Acceptance: a clean Windows
-  machine with neither Godot nor Node plays a campaign.
+- `tools/build-plat-sim.sh` overlays `tools/runner/*.mjs` onto plat-econ,
+  esbuild-bundles `game-server.mjs` + engine to one CJS file, injects the
+  SEA blob into official Node 22 linux-x64 and win-x64 binaries. CI
+  (`.github/workflows/plat-sim.yml`) builds both and smokes `new` +
+  `advance` on the Linux binary — no `node` on the argv, no plat-econ path.
+- plat looks for `plat-sim` / `plat-sim.exe` NEXT TO its own executable
+  first, then falls back to `node` + a `.mjs` (dev flow unchanged).
+  Callers pass only the verb and flags.
+- Ship = `plat.exe` + `plat-sim.exe` (see `tools/package-release.sh`). The
+  zip no longer carries a Node install or a plat-econ tree. A clean
+  Windows sitting with neither Godot nor Node is the remaining proof —
+  cut a `v*` tag and unzip on a machine that has neither.
 
 ## Phase 2 — Break ground in plat (start menu)
 
@@ -103,5 +111,5 @@ this renderer was born for).
 
 ## Order of work
 
-Phase 3.1–3.2 first (pricing + buy — the game loop closes), then Phase 1
-(sidecar, so anyone can play it), then 2, then 3.3–3.6, then 4, then 5.
+Phase 1 (sidecar) is done. Phase 2 polish and 3.3–3.6 next, then 4, then 5.
+A tagged zip on a clean Windows machine is the Phase 1 sitting.

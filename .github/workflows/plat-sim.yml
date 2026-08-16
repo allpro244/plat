@@ -1,0 +1,26 @@
+name: plat-sim
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sidecar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@10 --activate
+      - name: Build plat-sim (linux + windows) and smoke
+        run: bash tools/build-plat-sim.sh linux,windows
+      - name: Upload sidecar binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: plat-sim
+          path: |
+            dist/plat-sim
+            dist/plat-sim.exe

@@ -610,14 +610,12 @@ func _save_frame(rel: String) -> void:
 	print("[plat] frame -> ", out)
 
 func _bootstrap_selftest_campaign() -> void:
-	var runner := _resolve_runner()
-	if runner == "":
-		printerr("[plat] selftest: no simulation runner at ",
-				"/workspace/plat-econ/tools/game-server.mjs")
+	if not _has_sim():
+		printerr("[plat] selftest: no plat-sim sidecar and no game-server.mjs")
 		return
 	var dir := ProjectSettings.globalize_path("user://campaigns/selftest")
 	var out := []
-	var ran: Array = _run_sim(PackedStringArray([runner, "new", "--dir=" + dir,
+	var ran: Array = _run_sim(PackedStringArray(["new", "--dir=" + dir,
 			"--seed=1928"]))
 	var code: int = ran[0]
 	out = ran[1]
@@ -817,15 +815,10 @@ func _advance_campaign(months: int, until_attention: bool = false) -> void:
 	if _busy or _campaign_dir == "":
 		return
 	_busy = true
-	_ui.set_status("advancing %d months (simulation runs in node)..." % months)
+	_ui.set_status("advancing %d months..." % months)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var meta: Variant = JSON.parse_string(
-			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
-	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
-	if runner == "" or not FileAccess.file_exists(runner):
-		runner = _resolve_runner()
-	var args := PackedStringArray([runner, "advance", "--dir=" + _campaign_dir,
+	var args := PackedStringArray(["advance", "--dir=" + _campaign_dir,
 			"--months=%d" % months])
 	if until_attention:
 		args.append("--until=attention")
@@ -834,7 +827,7 @@ func _advance_campaign(months: int, until_attention: bool = false) -> void:
 	var code: int = ran[0]
 	out = ran[1]
 	_busy = false
-	if code != 0 or runner == "":
+	if code != 0:
 		_ui.set_status("advance FAILED (%d): %s" % [code, "".join(out).right(200)])
 		return
 	await _refresh_live()
@@ -916,8 +909,21 @@ func _show_card(b: Dictionary) -> void:
 	_ui.show_parcel(_enrich(b), _campaign_dir != "")
 
 
-## Where the simulation lives: the plat-sim sidecar next to the executable,
-## plat-econ shipped beside the exe, PLAT_SIM, a dev checkout, or nothing.
+## Where the simulation lives: plat-sim beside the executable (the shipped
+## zip), else node + a .mjs (dev). Callers pass only the verb and flags —
+## never a script path. The sidecar argv is `plat-sim new --dir=…`.
+func _resolve_sidecar() -> String:
+	var exe_dir := OS.get_executable_path().get_base_dir()
+	var name := "plat-sim.exe" if OS.get_name() == "Windows" else "plat-sim"
+	var beside := exe_dir.path_join(name)
+	if FileAccess.file_exists(beside):
+		return beside
+	var env := OS.get_environment("PLAT_SIM")
+	if env != "" and FileAccess.file_exists(env) and not env.ends_with(".mjs"):
+		return env
+	return ""
+
+
 func _sim_bin() -> String:
 	var exe_dir := OS.get_executable_path().get_base_dir()
 	if OS.get_name() == "Windows":
@@ -932,10 +938,37 @@ func _sim_bin() -> String:
 				return p
 	return "node"
 
-func _run_sim(args: PackedStringArray) -> Array:
+
+func _has_sim() -> bool:
+	return _resolve_sidecar() != "" or _mjs_runner() != ""
+
+
+func _mjs_runner() -> String:
+	if _campaign_dir != "":
+		var path := _campaign_dir + "/campaign.json"
+		if FileAccess.file_exists(path):
+			var meta: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+			if meta is Dictionary:
+				var recorded := str((meta as Dictionary).get("runner", ""))
+				if recorded.ends_with(".mjs") and FileAccess.file_exists(recorded):
+					return recorded
+	return _resolve_runner()
+
+
+func _run_sim(verb_and_flags: PackedStringArray) -> Array:
 	var out := []
+	var sidecar := _resolve_sidecar()
+	if sidecar != "":
+		var sea_code := OS.execute(sidecar, verb_and_flags, out, true)
+		return [sea_code, out]
+	var runner := _mjs_runner()
+	if runner == "":
+		return [127, ["no simulation — plat-sim beside the executable, or set PLAT_SIM"]]
+	var args := PackedStringArray([runner])
+	args.append_array(verb_and_flags)
 	var code := OS.execute(_sim_bin(), args, out, true)
 	return [code, out]
+
 
 func _resolve_runner() -> String:
 	var exe_dir := OS.get_executable_path().get_base_dir()
@@ -946,7 +979,7 @@ func _resolve_runner() -> String:
 	if FileAccess.file_exists(bundled):
 		return bundled
 	var env := OS.get_environment("PLAT_SIM")
-	if env != "" and FileAccess.file_exists(env):
+	if env != "" and env.ends_with(".mjs") and FileAccess.file_exists(env):
 		return env
 	var root := ProjectSettings.globalize_path("res://")
 	for rel in [
@@ -966,16 +999,15 @@ func _break_ground() -> void:
 func _break_ground_opts(size: String, density: String, cash: int) -> void:
 	if _busy:
 		return
-	var runner := _resolve_runner()
-	if runner == "":
-		_ui.show_error("No simulation", "plat-sim.mjs beside the executable, or set PLAT_SIM")
+	if not _has_sim():
+		_ui.show_error("No simulation", "plat-sim beside the executable, or set PLAT_SIM")
 		return
 	_busy = true
 	_ui.set_status("breaking ground (generating island, founding firm)...")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var dir := ProjectSettings.globalize_path("user://campaigns/c%d" % (randi() % 1000000))
-	var ran: Array = _run_sim(PackedStringArray([runner, "new", "--dir=" + dir,
+	var ran: Array = _run_sim(PackedStringArray(["new", "--dir=" + dir,
 			"--seed=%d" % (randi() % 100000),
 			"--size=" + size, "--density=" + density, "--cash=%d" % cash]))
 	var code: int = ran[0]
@@ -1256,13 +1288,8 @@ func _buy_selected() -> void:
 	_ui.set_status("buying %s..." % bbl)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var meta: Variant = JSON.parse_string(
-			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
-	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
-	if runner == "" or not FileAccess.file_exists(runner):
-		runner = _resolve_runner()
 	var out := []
-	var ran: Array = _run_sim(PackedStringArray([runner, "buy", "--dir=" + _campaign_dir,
+	var ran: Array = _run_sim(PackedStringArray(["buy", "--dir=" + _campaign_dir,
 			"--bbl=" + bbl]))
 	var code: int = ran[0]
 	out = ran[1]
@@ -1335,10 +1362,9 @@ func _refi_selected(product: String) -> void:
 func _fetch_refi_quotes(bbl: String) -> Array:
 	if _campaign_dir == "" or bbl == "":
 		return []
-	var runner := _resolve_runner()
-	if runner == "":
+	if not _has_sim():
 		return []
-	_run_sim(PackedStringArray([runner, "refi-quotes", "--dir=" + _campaign_dir,
+	_run_sim(PackedStringArray(["refi-quotes", "--dir=" + _campaign_dir,
 			"--bbl=" + bbl]))
 	var doc: Variant = JSON.parse_string(
 			FileAccess.get_file_as_string(_campaign_dir + "/refi.json"))
@@ -1350,10 +1376,9 @@ func _fetch_refi_quotes(bbl: String) -> Array:
 func _fetch_develop_options(bbl: String) -> Array:
 	if _campaign_dir == "" or bbl == "":
 		return []
-	var runner := _resolve_runner()
-	if runner == "":
+	if not _has_sim():
 		return []
-	_run_sim(PackedStringArray([runner, "develop-options", "--dir=" + _campaign_dir,
+	_run_sim(PackedStringArray(["develop-options", "--dir=" + _campaign_dir,
 			"--bbl=" + bbl]))
 	var doc: Variant = JSON.parse_string(
 			FileAccess.get_file_as_string(_campaign_dir + "/options.json"))
@@ -1367,12 +1392,7 @@ func _run_verb(op: String, extra: PackedStringArray) -> void:
 	_ui.set_status(op + "...")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var meta: Variant = JSON.parse_string(
-			FileAccess.get_file_as_string(_campaign_dir + "/campaign.json"))
-	var runner := str((meta as Dictionary).get("runner", "")) if meta is Dictionary else ""
-	if runner == "" or not FileAccess.file_exists(runner):
-		runner = _resolve_runner()
-	var args := PackedStringArray([runner, op, "--dir=" + _campaign_dir])
+	var args := PackedStringArray([op, "--dir=" + _campaign_dir])
 	args.append_array(extra)
 	var ran: Array = _run_sim(args)
 	var code: int = ran[0]
