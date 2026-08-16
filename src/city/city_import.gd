@@ -172,6 +172,8 @@ static func stamp_live(b: Dictionary, par: Dictionary) -> void:
 	b["lot_sqft"] = float(par.get("lotArea", 0.0))
 	b["held"] = int(par.get("held", 0)) == 1
 	b["developing"] = int(par.get("developing", 0)) == 1
+	b["devFloors"] = int(par.get("devFloors", 0))
+	b["devUse"] = str(par.get("devUse", ""))
 	b["value"] = float(par.get("value", -1.0))
 	b["ask"] = float(par.get("ask", -1.0))
 	b["listed"] = int(par.get("listed", 0)) == 1

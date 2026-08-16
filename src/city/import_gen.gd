@@ -214,6 +214,102 @@ static func build(ci: CityImport, street_mat: Material = null,
 	root.add_child(water)
 	return root
 
+
+## One tower crane per developing BBL. Height is the job's floor count
+## (exported as devFloors) times a 3.5 m floor-to-floor — a construction
+## fact, not a look tweak — plus clearance for the jib over the future roof.
+## Yellow is construction-equipment yellow (approx. RAL 1003). The orbital
+## camera looks down, so the readable mark is the mast + horizontal jib.
+static func build_cranes(ci: CityImport) -> Node3D:
+	var root := Node3D.new()
+	var seen := {}
+	var yellow := _mat(Color(0.91, 0.68, 0.12), 0.45)
+	yellow.metallic = 0.35
+	var steel := _mat(Color(0.22, 0.22, 0.23), 0.55)
+	steel.metallic = 0.6
+	var weight := _mat(Color(0.16, 0.16, 0.17), 0.7)
+	for b in ci.buildings:
+		if not b.get("developing", false) or b.get("deco", false):
+			continue
+		var bbl := str(b.get("bbl", ""))
+		if bbl == "" or seen.has(bbl):
+			continue
+		seen[bbl] = true
+		var floors := maxi(int(b.get("devFloors", 0)), 3)
+		root.add_child(_tower_crane(b, floors, yellow, steel, weight))
+	if seen.size() > 0:
+		print("[plat] cranes: %d on site" % seen.size())
+	return root
+
+
+static func _tower_crane(b: Dictionary, floors: int, yellow: Material,
+		steel: Material, weight: Material) -> Node3D:
+	var ring: PackedVector2Array = b["ring"]
+	var c := Vector2.ZERO
+	for p in ring:
+		c += p
+	c /= float(ring.size())
+	# Sit the mast on a lot corner, inset, so the jib covers the pad.
+	# Seeded by BBL so the same job does not wander between rebuilds.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("crane/%s" % str(b.get("bbl", "")))
+	var corner: Vector2 = ring[rng.randi_range(0, ring.size() - 1)]
+	var inward := (c - corner)
+	if inward.length() < 0.5:
+		inward = Vector2(1, 0)
+	var foot: Vector2 = corner + inward.normalized() * minf(4.0, inward.length() * 0.25)
+	var mast_h := maxf(18.0, float(floors) * 3.5 + 10.0)
+	var span := 0.0
+	for p in ring:
+		span = maxf(span, foot.distance_to(p))
+	var jib_len := clampf(span * 1.15, 16.0, 48.0)
+	var aim := (c - foot)
+	if aim.length() < 0.5:
+		aim = Vector2(1, 0)
+	var dir := aim.normalized()
+	# BoxMesh long axis is +X. Rotate about Y so +X lands on (dir.x, dir.y).
+	var yaw := atan2(-dir.y, dir.x)
+	var node := Node3D.new()
+	node.name = "crane_%s" % str(b.get("bbl", "x"))
+	var y0 := 0.26
+	var jib_y := y0 + mast_h + 2.4
+	node.add_child(_box(Vector3(foot.x, y0 + mast_h * 0.5, foot.y),
+			Vector3(1.15, mast_h, 1.15), yellow))
+	node.add_child(_box(Vector3(foot.x, y0 + mast_h + 1.1, foot.y),
+			Vector3(2.8, 2.2, 2.8), yellow))
+	var jib_mid := foot + dir * (jib_len * 0.5)
+	node.add_child(_box(Vector3(jib_mid.x, jib_y, jib_mid.y),
+			Vector3(jib_len, 0.7, 0.7), yellow, yaw))
+	var c_len := jib_len * 0.38
+	var c_mid := foot - dir * (c_len * 0.5)
+	node.add_child(_box(Vector3(c_mid.x, jib_y, c_mid.y),
+			Vector3(c_len, 0.7, 0.7), yellow, yaw))
+	var c_end := foot - dir * c_len
+	node.add_child(_box(Vector3(c_end.x, y0 + mast_h + 1.2, c_end.y),
+			Vector3(2.4, 1.6, 2.4), weight))
+	var hook := foot + dir * (jib_len * 0.62)
+	var drop := mast_h * 0.45
+	node.add_child(_box(Vector3(hook.x, jib_y - drop * 0.5, hook.y),
+			Vector3(0.18, drop, 0.18), steel))
+	node.add_child(_box(Vector3(hook.x, jib_y - drop, hook.y),
+			Vector3(1.1, 0.7, 1.1), steel))
+	node.add_child(_box(Vector3(foot.x, y0 + 0.15, foot.y),
+			Vector3(3.2, 0.3, 3.2), steel))
+	return node
+
+
+static func _box(center: Vector3, size: Vector3, mat: Material,
+		yaw: float = 0.0) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	mi.mesh = box
+	mi.position = center
+	mi.rotation.y = yaw
+	mi.material_override = mat
+	return mi
+
+
 static func _cap(st: SurfaceTool, ring: PackedVector2Array, y: float) -> void:
 	var idx := Geometry2D.triangulate_polygon(ring)
 	if idx.is_empty():

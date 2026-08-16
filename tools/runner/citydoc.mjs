@@ -38,7 +38,13 @@ export function buildCityDoc(E, city, g, extra = {}) {
       ...(distress ? { distress: 1 } : {}),
       // The player's deeds, marked: the renderer may celebrate them.
       ...(g.holdings[bbl] ? { held: 1 } : {}),
-      ...(g.developments?.[bbl] ? { developing: 1 } : {}),
+      ...(g.developments?.[bbl] ? {
+        developing: 1,
+        // Floors the job will deliver — the renderer sizes the crane from
+        // this, it does not invent a height.
+        devFloors: g.developments[bbl].floors ?? 0,
+        devUse: g.developments[bbl].use ?? "",
+      } : {}),
       ...(g.talks?.[bbl] ? { talk: 1, contracted: g.talks[bbl].agreed ? 1 : 0 } : {}),
       ...(approach ? { approach } : {}),
       class: p.class,

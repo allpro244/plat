@@ -843,6 +843,9 @@ func _refresh_live() -> void:
 	var t0 := Time.get_ticks_msec()
 	var remesh := city._import.refresh_parcels(_city_file)
 	print("[plat] live refresh remesh=%s in %d ms" % [str(remesh), Time.get_ticks_msec() - t0])
+	# Cranes are a thin node, not facade mesh. A develop verb does not
+	# change z1/floors/cls, so remesh stays false — still put the crane up.
+	city.refresh_cranes()
 	if remesh:
 		await _rebuild()
 		_refresh_open_page()
@@ -1111,6 +1114,8 @@ func _enrich(b: Dictionary) -> Dictionary:
 		out["ask"] = row["ask"]
 	if row.get("developing") != null:
 		out["developing"] = int(row["developing"]) == 1
+	if row.get("devFloors") != null:
+		out["devFloors"] = int(row["devFloors"])
 	if row.get("jobUse") != null:
 		out["jobUse"] = row["jobUse"]
 	if row.get("jobFloors") != null:
