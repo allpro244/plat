@@ -17,7 +17,7 @@ DIST="${DIST:-dist}"
 CACHE="${CACHE:-dist/node-cache}"
 TARGETS="${1:-linux,windows}"
 FUSE="NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2"
-POSTJECT_VER="${POSTJECT_VER:-1.0.3}"
+POSTJECT_VER="${POSTJECT_VER:-1.0.0-alpha.6}"
 
 want() { [[ ",$TARGETS," == *",$1,"* ]] || [[ "$TARGETS" == "all" ]]; }
 

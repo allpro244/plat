@@ -18,19 +18,22 @@
 // The engine import is static so esbuild can inline it into one CJS blob
 // (tools/build-plat-sim.sh). `pnpm engine` must have written test/.engine.mjs.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { makeCity, PROCEDURAL, DEFAULT_SIZE } from "../src/citygen/index.mjs";
 import { buildCityDoc, hudOf, writeDesks } from "./citydoc.mjs";
 import * as Engine from "../test/.engine.mjs";
 
 const E = globalThis.__PLAT_ENGINE ?? Engine;
 
-// node tools/game-server.mjs CMD …  → argv[1] is the script
-// ./plat-sim CMD …                  → argv[1] is the command (SEA has no script path)
-const userArgv = /\.(mjs|cjs|js)$/.test(process.argv[1] ?? "")
-  ? process.argv.slice(2)
-  : process.argv.slice(1);
+// node tools/game-server.mjs CMD …  → argv[1] is the script, CMD at [2]
+// ./plat-sim CMD …                  → argv[1] is the invocation path, CMD at [2]
+// shebang ./game-server.mjs CMD …   → CMD at [1]
+const VERBS = new Set([
+  "new", "advance", "buy", "list", "delist", "accept-offer", "offer", "walk",
+  "accept-counter", "close", "respond-loi", "draw", "repay", "refi-quotes",
+  "refi", "develop-options", "develop",
+]);
+const userArgv = VERBS.has(process.argv[1]) ? process.argv.slice(1) : process.argv.slice(2);
 const cmd = userArgv[0];
 const arg = (name, dflt) => {
   const hit = userArgv.find((a) => a.startsWith(`--${name}=`));
@@ -83,7 +86,7 @@ if (cmd === "new") {
   // directory can find the sim. Empty inside the SEA sidecar — plat then
   // looks for plat-sim beside its own executable.
   const script = process.argv[1] ?? "";
-  meta.runner = /\.(mjs|cjs|js)$/.test(script) ? fileURLToPath(import.meta.url) : "";
+  meta.runner = /\.(mjs|cjs|js)$/.test(script) ? resolve(script) : "";
   const cash0 = Math.max(0, parseInt(arg("cash", "2500000"), 10) || 2500000);
   meta.cash0 = cash0;
   writeFileSync(join(dir, "campaign.json"), JSON.stringify(meta));
