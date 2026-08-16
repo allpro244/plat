@@ -112,6 +112,7 @@ export function hudOf(E, city, g) {
     yearOne: yo.yearOne,
     monthsLeft: yo.monthsLeft,
     next: yo.next,
+    rungs: yo.rungs,
     deals: Object.keys(g.talks ?? {}).length + principalLetters(E, g).length,
     letters: principalLetters(E, g).length,
   };
@@ -119,9 +120,18 @@ export function hudOf(E, city, g) {
 
 const YEAR_ONE_IDS = ["deed1", "lease1", "tower1", "exit1", "nw25"];
 
+const RUNG_SHORT = {
+  deed1: "Deed",
+  lease1: "Lease",
+  tower1: "Tower",
+  exit1: "Exit",
+  nw25: "$25M",
+};
+
 function milestonePage(id) {
   if (id === "deed1") return "market";
   if (id === "lease1") return "leasing";
+  if (id === "tower1") return "property";
   return "portfolio";
 }
 
@@ -136,36 +146,64 @@ function holdingHasFloors(E, city, g) {
   return false;
 }
 
-/** Next year-one rung. The engine's test function decides; we paint the label.
- *  After January 2001 the year-one tape is over — do not nag a rung that
- *  can no longer be the year's work. lease1 does not count inherited paper
- *  (engine: t.startM > h.boughtM); we say so instead of sending dirt to
- *  the portfolio room. */
+function holdingHasLand(E, city, g) {
+  for (const bbl of Object.keys(g.holdings ?? {})) {
+    if (g.developments?.[bbl]) continue;
+    const rec = E.resolveRec?.(city?.parcels, g, bbl);
+    if (rec?.class === "land") return true;
+  }
+  return false;
+}
+
+function lease1Hint(E, city, g) {
+  if (Object.keys(g.developments ?? {}).length && !holdingHasFloors(E, city, g)) {
+    return { page: "portfolio", note: "The job is in the ground. A new tenant comes after it delivers." };
+  }
+  if (!holdingHasFloors(E, city, g)) {
+    return { page: "market", note: "Buy a building. Vacant dirt has no roll." };
+  }
+  return { page: "leasing", note: "A new tenant, after you bought. Renewing inherited paper does not count." };
+}
+
+/** Every founding rung, done or not. The engine's test decides; we paint.
+ *  After January 2001 the header is no longer YEAR ONE, but unfinished
+ *  rungs stay — lease1 must not hide a tower or an exit. */
 function yearOneOf(E, city, g, nw) {
   const month = g.month ?? 0;
-  if (month >= 12) {
-    return { yearOne: false, monthsLeft: 0, next: null };
-  }
+  const yearOne = month < 12;
+  const rungs = [];
   let next = null;
   try {
     for (const m of (E.MILESTONES ?? [])) {
       if (!YEAR_ONE_IDS.includes(m.id)) continue;
-      if (typeof m.test === "function" && !m.test(g, nw ?? 0)) {
-        next = { id: m.id, label: m.label, page: milestonePage(m.id) };
-        if (m.id === "lease1") {
-          if (!holdingHasFloors(E, city, g)) {
-            next.page = "market";
-            next.note = "Buy a building. Vacant dirt has no roll.";
-          } else {
-            next.page = "leasing";
-            next.note = "A new tenant, after you bought. Renewing inherited paper does not count.";
-          }
-        }
-        break;
+      const done = typeof m.test === "function" && !!m.test(g, nw ?? 0);
+      const stamped = g.milestones?.[m.id];
+      const row = {
+        id: m.id,
+        label: m.label,
+        short: RUNG_SHORT[m.id] ?? m.id,
+        page: milestonePage(m.id),
+        done,
+        at: stamped != null ? monthLabel(stamped) : null,
+      };
+      if (!done && m.id === "lease1") {
+        const hint = lease1Hint(E, city, g);
+        row.page = hint.page;
+        row.note = hint.note;
+      }
+      if (!done && m.id === "tower1") {
+        row.page = holdingHasLand(E, city, g) ? "property" : "portfolio";
+      }
+      if (!done && m.id === "exit1") {
+        row.page = Object.keys(g.holdings ?? {}).length ? "portfolio" : "market";
+      }
+      rungs.push(row);
+      if (!done && !next) {
+        next = { id: row.id, label: row.label, page: row.page, ...(row.note ? { note: row.note } : {}) };
       }
     }
   } catch { /* */ }
-  return { yearOne: true, monthsLeft: Math.max(0, 12 - month), next };
+  return { yearOne, monthsLeft: yearOne ? Math.max(0, 12 - month) : 0, next, rungs };
 }
 
 function readVitals(E, city, g) {

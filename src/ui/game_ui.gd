@@ -611,8 +611,9 @@ func refresh_vitals(hud: Dictionary, campaign: bool) -> void:
 	var nxt: Variant = hud.get("next", {})
 	_attention = items
 	_prune_deferred()
+	var rungs: Array = hud.get("rungs", []) if hud.get("rungs") is Array else []
 	set_inbox(items, bool(hud.get("yearOne", false)), int(hud.get("monthsLeft", 0)),
-			nxt if nxt is Dictionary else {})
+			nxt if nxt is Dictionary else {}, rungs)
 	_advance_btn.text = "Decide ▸" if not _first_blocking().is_empty() else "Advance ▸"
 
 
@@ -650,11 +651,14 @@ func set_listings_lens(on: bool) -> void:
 		_style_btn(_lens_btns["listings"], on, false)
 
 
-func set_inbox(items: Array, year_one: bool = false, months_left: int = 0, next: Dictionary = {}) -> void:
+func set_inbox(items: Array, year_one: bool = false, months_left: int = 0,
+		next: Dictionary = {}, rungs: Array = []) -> void:
 	_clear(_inbox_body)
 	var kick := Label.new()
 	if year_one:
 		kick.text = "YEAR ONE · %d MO LEFT" % months_left
+	elif not rungs.is_empty():
+		kick.text = "THE BOOK"
 	elif not items.is_empty():
 		kick.text = "ON YOUR DESK · %d" % items.size()
 	else:
@@ -663,6 +667,24 @@ func set_inbox(items: Array, year_one: bool = false, months_left: int = 0, next:
 	kick.add_theme_font_size_override("font_size", 9)
 	kick.add_theme_color_override("font_color", BwTheme.GOLD)
 	_inbox_body.add_child(kick)
+	var extra := 0
+	if not rungs.is_empty():
+		var chips := HBoxContainer.new()
+		chips.add_theme_constant_override("separation", 8)
+		for raw in rungs:
+			if not (raw is Dictionary):
+				continue
+			var r: Dictionary = raw
+			var chip := Label.new()
+			var done := bool(r.get("done", false))
+			chip.text = ("%s %s" % ["✓" if done else "·", str(r.get("short", r.get("id", "")))])
+			chip.add_theme_font_override("font", BwTheme.mono())
+			chip.add_theme_font_size_override("font_size", 10)
+			chip.add_theme_color_override("font_color",
+					BwTheme.GOLD if done else BwTheme.INK)
+			chips.add_child(chip)
+		_inbox_body.add_child(chips)
+		extra += 22
 	if items.is_empty():
 		var hint := Label.new()
 		var nxt_label := str(next.get("label", "")) if not next.is_empty() else ""
@@ -677,12 +699,13 @@ func set_inbox(items: Array, year_one: bool = false, months_left: int = 0, next:
 			sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			BwTheme.style_label(sub, 12, false, true)
 			_inbox_body.add_child(sub)
+			extra += 40
 		if not next.is_empty():
 			var page := str(next.get("page", "market"))
 			var go := _lens("Acquire" if page == "market" else "Open", false)
 			go.pressed.connect(func() -> void: open_page(page))
 			_inbox_body.add_child(go)
-		_inbox.offset_bottom = 232 + (40 if note != "" else 0)
+		_inbox.offset_bottom = 232 + extra
 		_place_map_hud()
 		return
 	for it in items:
@@ -701,7 +724,15 @@ func set_inbox(items: Array, year_one: bool = false, months_left: int = 0, next:
 			open_page(str(captured.get("page", "market"))))
 		row.add_child(open)
 		_inbox_body.add_child(row)
-	_inbox.offset_bottom = 108 + 48 + items.size() * 40
+	if not next.is_empty() and not rungs.is_empty():
+		var sub := Label.new()
+		var note := str(next.get("note", ""))
+		sub.text = note if note != "" else str(next.get("label", ""))
+		sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		BwTheme.style_label(sub, 12, false, true)
+		_inbox_body.add_child(sub)
+		extra += 36
+	_inbox.offset_bottom = 108 + 48 + items.size() * 40 + extra
 	_place_map_hud()
 
 
@@ -1900,8 +1931,8 @@ func _paint_prop_build(b: Dictionary, developing: bool) -> void:
 		return
 	_note("The engine underwrote these. A row that does not pencil still runs — the error is the engine's.")
 	_sheet_head([
-		["Use", 110, false], ["Fl", 40, true], ["Sf", 80, true],
-		["Cost", 88, true], ["Verdict", 0, false],
+		["Use", 88, false], ["Fl", 36, true], ["Mo", 36, true], ["Sf", 72, true],
+		["Cost", 80, true], ["Verdict", 0, false],
 	])
 	for o in _prop_options:
 		var use := str(o.get("use", ""))
@@ -1911,11 +1942,14 @@ func _paint_prop_build(b: Dictionary, developing: bool) -> void:
 				str(why) if why != null and str(why) != "<null>" else "does not pencil")
 		var u := use
 		var f := floors
+		var mo = o.get("months")
+		var mo_s := "—" if mo == null or str(mo) == "<null>" else str(int(mo))
 		_sheet_row([
-			[use, 110, false],
-			[str(floors), 40, true],
-			[_fmt_sf(float(o.get("sf", 0))), 80, true],
-			[_usd(float(o.get("cost", 0))), 88, true],
+			[use, 88, false],
+			[str(floors), 36, true],
+			[mo_s, 36, true],
+			[_fmt_sf(float(o.get("sf", 0))), 72, true],
+			[_usd(float(o.get("cost", 0))), 80, true],
 			[mark, 0, false],
 		], "", false, func() -> void: develop_pressed.emit(u, f), bool(o.get("clears", false)))
 
@@ -2023,7 +2057,7 @@ func _add_room_nav(page: String) -> void:
 func _siblings_of(page: String) -> Array:
 	match _job_of(page):
 		"acquire":
-			return [["market", "Marketplace"], ["deals", "Deals"], ["notes", "Notes"]]
+			return [["market", "Marketplace"], ["deals", "Deals"]]
 		"assets":
 			return [["portfolio", "Portfolio"], ["leasing", "Leasing"], ["property", "Property"]]
 		"capital":

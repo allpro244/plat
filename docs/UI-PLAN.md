@@ -497,11 +497,13 @@ invent one.
 U5 leftover + U9 inbox / map HUD (this cut): the city tells you
 what to do, and a room owns the screen.
 
-- Year-one inbox reads the engine's next milestone (`MILESTONES.test`),
-  not "Nothing waiting." Months left are `12 - month`. The button
-  routes to the desk that milestone lives on. After January 2001 the
-  tape stops. `lease1` does not count inherited paper; vacant dirt
-  has no roll, so the note says so and Acquire stays on the tape.
+- Year-one inbox paints every founding rung (`deed1` / `lease1` /
+  `tower1` / `exit1` / `nw25`) as done or not. The button routes to
+  the first incomplete. After January 2001 the header is no longer
+  YEAR ONE, but unfinished rungs stay — lease1 must not hide a tower
+  or an exit. `lease1` does not count inherited paper; vacant dirt
+  has no roll, so the note says so. Notes / Staff / Research stay
+  closed until the runner writes a desk.
 - Map HUD under the inbox: deliveries, balloons inside 18 months,
   City / Book / Cranes filters. Book is the owners overlay; Cranes
   tints jobs under construction. Numbers come from `desks/map.json`.

@@ -35,8 +35,21 @@ const arg = (name, dflt) => {
 const dir = arg("dir", "campaign");
 
 function buildParcels(meta) {
+  // Godot shells a fresh node process per verb. An in-memory cache dies
+  // with the process. The island is a pure function of seed/size/density —
+  // write it once, read it back. Advance is the tick, not a regen.
+  const cached = join(dir, "island.json");
+  if (existsSync(cached)) {
+    const t0 = Date.now();
+    const city = JSON.parse(readFileSync(cached, "utf8"));
+    console.log(`island cache ${Date.now() - t0}ms`);
+    return city;
+  }
+  const t0 = Date.now();
   const city = makeCity(PROCEDURAL, meta.seed, { size: meta.size, density: meta.density });
   E.normalizeParcels(city.parcels);
+  writeFileSync(cached, JSON.stringify(city));
+  console.log(`island gen ${Date.now() - t0}ms -> ${cached}`);
   return city;
 }
 
@@ -132,6 +145,7 @@ if (cmd === "new") {
         const uw = E.underwriteDevelopment(g, city.parcels, bbl, use, floors);
         if (uw?.plan) options.push({
           use, floors, sf: Math.round(uw.plan.sf), cost: Math.round(uw.plan.costTotal),
+          months: uw.plan.months != null ? Math.round(uw.plan.months) : null,
           clears: !!uw.clears, financeable: !!uw.financeable, why: uw.why ?? null,
         });
       } catch { /* infeasible */ }

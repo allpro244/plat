@@ -322,8 +322,9 @@ func _run_selftest() -> void:
 				before, cash_a / 1e6,
 				str(_hud_game.get("date", "?")), float(_hud_game.get("cash", 0)) / 1e6])
 		_ui.hide_page()
-		print("[plat] selftest inbox: yearOne=%s next=%s" % [
-				str(_hud_game.get("yearOne")), str(_hud_game.get("next", {}))])
+		print("[plat] selftest inbox: yearOne=%s next=%s rungs=%s" % [
+				str(_hud_game.get("yearOne")), str(_hud_game.get("next", {})),
+				str(_hud_game.get("rungs", []))])
 		for i in range(8):
 			await get_tree().process_frame
 		await _save_frame("renders/ui_inbox.png")
@@ -364,7 +365,8 @@ func _run_selftest() -> void:
 			if _ui.is_parcel_visible():
 				print("[plat] selftest owned card: ", _ui.parcel_debug_text())
 			_ui.hide_page()
-			print("[plat] selftest inbox after lot: next=%s" % str(_hud_game.get("next", {})))
+			print("[plat] selftest inbox after lot: next=%s rungs=%s" % [
+					str(_hud_game.get("next", {})), str(_hud_game.get("rungs", []))])
 			for i in range(8):
 				await get_tree().process_frame
 			await _save_frame("renders/ui_map.png")
