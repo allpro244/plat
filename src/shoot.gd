@@ -99,6 +99,8 @@ func _parse_args() -> Dictionary:
 				ContextGen.overlay = val
 			"tx":
 				p["target_x"] = float(val)
+			"ty":
+				p["target_y"] = float(val)
 			"tz":
 				p["target_z"] = float(val)
 			_:
