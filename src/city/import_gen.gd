@@ -127,7 +127,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 					_dashes(paint, PackedVector2Array([p0, p1]), 0.3,
 							7.0 if center else 2.8, 2.4 if center else 3.6, 0.10)
 	paint.generate_normals()
-	root.add_child(_mesh(paint, _mat(Color(0.62, 0.61, 0.58), 0.75)))
+	root.add_child(_mesh(paint, _mat(Color(0.44, 0.43, 0.41), 0.8)))
 
 	# Park paths: gravel ribbons.
 	var path := SurfaceTool.new()
