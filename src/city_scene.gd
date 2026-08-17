@@ -82,6 +82,7 @@ func _ready() -> void:
 				_ground_material("asphalt", Color(0.155, 0.155, 0.16), 0.92, 6.0), walk))
 		add_child(ContextGen.build_imported(_import, _matlib, night))
 		refresh_cranes()
+		refresh_held_marks()
 	if _import == null and not params.get("no_block", false):
 		_build_block()
 	if _plan != null:
@@ -98,6 +99,8 @@ func _ready() -> void:
 		rig.set_target_xz(_import.core.x, _import.core.y)
 	if params.get("target_x") != null:
 		rig.set_target_xz(float(params["target_x"]), float(params.get("target_z", 0.0)))
+	if params.get("target_y") != null:
+		rig.set_target_y(float(params["target_y"]))
 	add_child(rig)
 	rig.set_band(params["band"])
 	if params["cam_azimuth"] == null:
@@ -117,6 +120,20 @@ func refresh_cranes() -> void:
 		return
 	var n := ImportGen.build_cranes(_import)
 	n.name = "cranes"
+	add_child(n)
+
+
+## Gold lids on the player's deeds. Same thin-node rule as cranes: a buy
+## stamps `held` without changing massing, so this rebuilds on every refresh.
+func refresh_held_marks() -> void:
+	var old := get_node_or_null("held_marks")
+	if old != null:
+		remove_child(old)
+		old.free()
+	if _import == null:
+		return
+	var n := ImportGen.build_held_marks(_import)
+	n.name = "held_marks"
 	add_child(n)
 
 

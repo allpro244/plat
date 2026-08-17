@@ -207,14 +207,11 @@ func _build_topbar() -> void:
 	var sep := Label.new()
 	sep.text = " "
 	row2.add_child(sep)
-	for lens in [["listings", "◉ Market"], ["owners", "◫ Owners"]]:
+	for lens in [["listings", "◉ Market"], ["owners", "◫ Owners"],
+			["demand", "◈ Demand"], ["land", "▤ Land"]]:
 		var b := _lens(lens[1], false)
 		var id: String = lens[0]
-		b.pressed.connect(func() -> void:
-			var on := not bool(_lenses.get(id, false))
-			_lenses[id] = on
-			_style_btn(b, on, id == "owners")
-			lens_pressed.emit(id, on))
+		b.pressed.connect(func() -> void: _toggle_lens(id))
 		row2.add_child(b)
 		_lens_btns[id] = b
 
@@ -639,16 +636,28 @@ func set_help(_text: String, _visible: bool) -> void:
 	pass
 
 
+func _toggle_lens(id: String) -> void:
+	var on := not bool(_lenses.get(id, false))
+	for k in ["listings", "owners", "demand", "land"]:
+		_lenses[k] = k == id and on
+		if _lens_btns.has(k):
+			_style_btn(_lens_btns[k], _lenses[k], k == "owners")
+	lens_pressed.emit(id, on)
+
+
 func set_owners_lens(on: bool) -> void:
-	_lenses["owners"] = on
-	if _lens_btns.has("owners"):
-		_style_btn(_lens_btns["owners"], on, true)
+	set_overlay_lens("owners" if on else "")
 
 
 func set_listings_lens(on: bool) -> void:
-	_lenses["listings"] = on
-	if _lens_btns.has("listings"):
-		_style_btn(_lens_btns["listings"], on, false)
+	set_overlay_lens("listings" if on else "")
+
+
+func set_overlay_lens(id: String) -> void:
+	for k in ["listings", "owners", "demand", "land"]:
+		_lenses[k] = k == id
+		if _lens_btns.has(k):
+			_style_btn(_lens_btns[k], _lenses[k], k == "owners")
 
 
 func set_inbox(items: Array, year_one: bool = false, months_left: int = 0,
@@ -1393,11 +1402,7 @@ func _paint_market() -> void:
 		filters.add_child(b)
 	var hl := _lens("Highlight on map", bool(_lenses.get("listings", false)))
 	hl.pressed.connect(func() -> void:
-		var on := not bool(_lenses.get("listings", false))
-		_lenses["listings"] = on
-		if _lens_btns.has("listings"):
-			_style_btn(_lens_btns["listings"], on, false)
-		lens_pressed.emit("listings", on)
+		_toggle_lens("listings")
 		_paint_market())
 	filters.add_child(hl)
 	_note("On-market listings. Click a row to put it on the card.")

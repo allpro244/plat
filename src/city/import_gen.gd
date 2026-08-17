@@ -183,13 +183,21 @@ static func build(ci: CityImport, street_mat: Material = null,
 	var masses := SurfaceTool.new()
 	masses.begin(Mesh.PRIMITIVE_TRIANGLES)
 	masses.set_smooth_group(-1)
+	var map_dirt := ContextGen.overlay == "demand" or ContextGen.overlay == "land"
 	for b in ci.buildings:
 		var ring: PackedVector2Array = b["ring"]
 		var z1: float = b["z1"]
 		if z1 <= 0.05:
 			# Bare dirt with a hint of the lot's tone index — an empty lot,
-			# not a white void.
-			masses.set_color(Color(0.32, 0.29, 0.25) * (0.9 + 0.06 * float(int(b["tone"]) % 3)))
+			# not a white void. Demand/Land lenses paint the slab from the
+			# export (vertex colour); the default city keeps a fixed albedo
+			# because vertex tints on this surface once rendered white.
+			if ContextGen.overlay == "demand":
+				masses.set_color(ContextGen.demand_tint(float(b.get("demand", 0.0))))
+			elif ContextGen.overlay == "land":
+				masses.set_color(ContextGen.class_tint(str(b.get("cls", "land"))))
+			else:
+				masses.set_color(Color(0.32, 0.29, 0.25) * (0.9 + 0.06 * float(int(b["tone"]) % 3)))
 			_cap(masses, ring, 0.26)
 			continue
 		if not b["deco"]:
@@ -197,10 +205,12 @@ static func build(ci: CityImport, street_mat: Material = null,
 		masses.set_color(Color(0.30, 0.30, 0.31))
 		_prism_colored(masses, ring, float(b["z0"]), z1, Color(0.30, 0.30, 0.31))
 	masses.generate_normals()
-	# Fixed dirt albedo, NOT vertex colors: the debug-color frame proved
-	# the vertex tints never landed on this surface, which rendered every
-	# vacant lot white — the "confetti" in three mid-band frames.
-	root.add_child(_mesh(masses, _mat(Color(0.30, 0.275, 0.24), 0.95)))
+	if map_dirt:
+		var vm := _mat(Color.WHITE, 0.95)
+		vm.vertex_color_use_as_albedo = true
+		root.add_child(_mesh(masses, vm))
+	else:
+		root.add_child(_mesh(masses, _mat(Color(0.30, 0.275, 0.24), 0.95)))
 
 	# Water: one plane under everything, past the coast to the horizon.
 	var water := MeshInstance3D.new()
@@ -239,6 +249,41 @@ static func build_cranes(ci: CityImport) -> Node3D:
 		root.add_child(_tower_crane(b, floors, yellow, steel, weight))
 	if seen.size() > 0:
 		print("[plat] cranes: %d on site" % seen.size())
+	return root
+
+
+## Gold lid on every held BBL. The orbital camera looks down, so a roof
+## plate is the mark — not a facade recolor (that is the Owners lens).
+## Thin node: a buy does not remesh the city. Same gold as the owners
+## overlay (Color 0.95, 0.72, 0.18). One plate per deed, on the tallest
+## volume, so a setback tower is not a stack of lids.
+static func build_held_marks(ci: CityImport) -> Node3D:
+	var root := Node3D.new()
+	if ContextGen.overlay != "":
+		return root
+	var best := {}
+	for b in ci.buildings:
+		if not b.get("held", false) or b.get("deco", false):
+			continue
+		var bbl := str(b.get("bbl", ""))
+		if bbl == "":
+			continue
+		if not best.has(bbl) or float(b["z1"]) > float((best[bbl] as Dictionary)["z1"]):
+			best[bbl] = b
+	if best.is_empty():
+		return root
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(-1)
+	for bbl in best:
+		var b: Dictionary = best[bbl]
+		var y := maxf(float(b["z1"]), 0.26) + 0.18
+		_cap(st, b["ring"], y)
+	st.generate_normals()
+	var mat := _mat(Color(0.95, 0.72, 0.18), 0.38)
+	mat.metallic = 0.42
+	root.add_child(_mesh(st, mat))
+	print("[plat] held marks: %d deeds" % best.size())
 	return root
 
 
