@@ -113,16 +113,20 @@ static func build_imported(ci: CityImport, matlib: Dictionary,
 	var buckets := {}
 	for i in range(ci.buildings.size()):
 		var occ: float = ci.buildings[i]["occ"]
-		var k := -1 if occ < 0.0 else clampi(int(occ * 8.0), 0, 7)
+		var cond: float = float(ci.buildings[i].get("cond", -1.0))
+		var occ_k := -1 if occ < 0.0 else clampi(int(occ * 8.0), 0, 7)
+		var cond_k := -1 if cond < 0.0 else clampi(int(cond * 8.0), 0, 7)
+		var k := Vector2i(occ_k, cond_k)
 		if not buckets.has(k):
 			buckets[k] = []
 		buckets[k].append(i)
 	for k in buckets:
 		var idxs: Array = buckets[k]
-		var lit := -1.0 if k == -1 else (float(k) + 0.5) / 8.0
+		var lit := -1.0 if k.x < 0 else (float(k.x) + 0.5) / 8.0
+		var cond_u := -1.0 if k.y < 0 else (float(k.y) + 0.5) / 8.0
 		for c0 in range(0, idxs.size(), chunk):
 			root.add_child(_imported_chunk(ci, idxs.slice(c0, mini(c0 + chunk, idxs.size())),
-					fam, district_p, lit))
+					fam, district_p, lit, cond_u))
 	return root
 
 static func _imported_district_p(district: String, seed_value: int,
@@ -151,7 +155,8 @@ static func _imported_district_p(district: String, seed_value: int,
 	return p
 
 static func _imported_chunk(ci: CityImport, indices: Array,
-		fam: Dictionary, district_p: Dictionary, lit_occ: float) -> MeshInstance3D:
+		fam: Dictionary, district_p: Dictionary, lit_occ: float,
+		cond_u: float = -1.0) -> MeshInstance3D:
 	var st := _st()
 	var st_b := _st()
 	var st_c := _st()
@@ -212,6 +217,10 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 				Color(0.17, 0.21, 0.18)]
 		var rtone: Color = rtones[(int(b["tone"]) + int(rng.randf() * 2.0)) % rtones.size()] \
 				* rng.randf_range(0.85, 1.15)
+		# Worn stock: a dirtier lid. The number is the engine's cond.
+		# Skip on a map overlay — the lid is the choropleth.
+		if overlay == "" and cond_u >= 0.0:
+			rtone *= 0.70 + 0.30 * cond_u
 		# x:1 marks the topmost volume of a building — for most buildings
 		# that IS the windowed body (first render treating every x:1 as a
 		# roof turned half the city into toneless grey prisms). Only a
@@ -266,6 +275,8 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			var tm := _tower_material(rng2)
 			if lit_occ >= 0.0:
 				tm.set_shader_parameter("lit_fraction", lit_occ * night)
+			if overlay == "" and cond_u >= 0.0:
+				tm.set_shader_parameter("condition", cond_u)
 			mats.append(tm)
 		else:
 			var em := _facade_material(rng2, p_any)
@@ -275,6 +286,8 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			# constant — a vacant building goes dark because it is vacant.
 			if lit_occ >= 0.0:
 				em.set_shader_parameter("lit_fraction", lit_occ * night)
+			if overlay == "" and cond_u >= 0.0:
+				em.set_shader_parameter("condition", cond_u)
 			if overlay != "":
 				# An overlay is a MAP: flat color reads, brick texture
 				# muting the gold does not (seen in the first overlay

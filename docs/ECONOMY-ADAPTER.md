@@ -50,7 +50,8 @@ Every visual rule plat has keeps its input, the input just becomes real:
 | `floors`, `z0..z1` | massing height — replaces the height-mode sample |
 | `class` / `mix` | facade vocabulary: office → curtain wall/punched masonry by era; residential → rowhouse/loft grain; retail leg → shopfront band + awnings; `land` → gravel-and-fence vacant lot (engine exports these flat, `k:1`) |
 | `district` | palette family + street culture per district — replaces Voronoi district assignment |
-| `demandScore`, occupancy (later) | lit-window fraction at dusk — the CLAUDE.md "no fake frames" rule finally gets its real signal |
+| `demandScore`, occupancy | lit-window fraction at dusk — the CLAUDE.md "no fake frames" rule finally gets its real signal |
+| `cond` (`condIdx` / `initialCondIdx`) | facade weather: dirt wash from the pavement up, dirtier glass, darker lids |
 | `shoreM`, `corner` | corner shopfronts, esplanade-facing frontages |
 | `t` tone | seeds the UV2 style hash so identity stays per-building stable |
 

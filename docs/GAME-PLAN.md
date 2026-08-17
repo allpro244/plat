@@ -88,6 +88,9 @@ grows the UI that drives it. Order chosen so each step is playable alone:
   values. Renderer-only; no new engine work.
 - **Held portfolio glow**, vacancy reading at street level (already
   occupancy-driven at dusk; add boarded shopfronts by day).
+- **Condition weather**: a facade dirties from the pavement up because
+  exported `cond` (engine `condIdx` / `initialCondIdx`) is low — not a
+  uniform grime pass.
 - **Construction cranes**: a tower crane stands on every lot the sim has
   marked `developing`. Height is `devFloors` × 3.5 m. Raised on the
   develop verb without remeshing the city.

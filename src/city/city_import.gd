@@ -184,6 +184,9 @@ static func stamp_live(b: Dictionary, par: Dictionary) -> void:
 	# The economy's occupancy for this parcel (0-1). Drives dusk windows;
 	# absent in old exports -> -1 sentinel.
 	b["occ"] = float(par.get("occ", -1.0))
+	# Condition index 0–1 (engine condIdx / initialCondIdx). Drives
+	# facade weather. Absent -> -1, no weather.
+	b["cond"] = float(par.get("cond", -1.0))
 	b["approach"] = par.get("approach", {})
 
 ## Re-read city.json onto the existing building records. Returns true when

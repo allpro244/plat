@@ -40,6 +40,10 @@ uniform float glass_metallic : hint_range(0.0, 1.0) = 0.5;
 // go dark while walkups eat dinner, and everything is off at noon.
 uniform float lit_fraction : hint_range(0.0, 1.0) = 0.0;
 uniform float shop_lit_fraction : hint_range(0.0, 1.0) = 0.0;
+// Engine condIdx / initialCondIdx, 0–1. <0 means the export had no
+// condition and we do not invent weather. Low condition dirties the
+// wall from the pavement up; it is not a uniform grime wash.
+uniform float condition = -1.0;
 uniform float win_seed = 0.0;
 // Interior tungsten ~2700K. Energy tuned against the dusk exposure by
 // render, the only way an emissive value can honestly be chosen.
@@ -150,6 +154,9 @@ void fragment() {
 		vec3 g = glass_color.rgb * mix(1.0, mix(0.6, 1.5, fract(sb * 97.7)), styled);
 		g.b *= mix(1.0, mix(0.85, 1.25, fract(sb * 43.9)), styled);
 		ALBEDO = g * (0.45 + 0.55 * smoothstep(1.0, 0.7, edge));
+		if (condition >= 0.0) {
+			ALBEDO *= 0.72 + 0.28 * clamp(condition, 0.0, 1.0);
+		}
 		// PUNCHED-REVEAL SHADING: a real window sits behind the wall plane,
 		// so its head and one jamb hold shadow. Faking that recess is most
 		// of what "depth" means at the bands' distances.
@@ -240,6 +247,16 @@ void fragment() {
 		}
 		ROUGHNESS = mix(wall_roughness, texture(wall_roughness_tex, wuv).r, use_roughness_texture);
 		METALLIC = wall_metallic;
+		if (condition >= 0.0) {
+			float wear = 1.0 - clamp(condition, 0.0, 1.0);
+			float up = clamp(y / max(vheight, 1.0), 0.0, 1.0);
+			// Street-level dirt is heavier; the crown stays closer to clean.
+			ALBEDO *= 1.0 - wear * (0.18 + 0.32 * (1.0 - up));
+			// A few vertical streaks — downpipes / overflow, not noise.
+			float streak = step(0.88, fract(mx * 0.37 + sb * 3.1));
+			ALBEDO *= 1.0 - wear * 0.22 * streak * (1.0 - up);
+			ROUGHNESS = mix(ROUGHNESS, 0.97, wear * 0.6);
+		}
 		if (use_wall_texture > 0.5) {
 			NORMAL_MAP = texture(wall_normal, wuv).rgb;
 			AO = texture(wall_ao, wuv).r;

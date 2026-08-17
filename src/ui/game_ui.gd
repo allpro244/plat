@@ -854,6 +854,8 @@ func show_parcel(b: Dictionary, campaign: bool) -> void:
 	_grid_row("Built", str(int(b.get("year", 0))))
 	if float(b.get("occ", -1.0)) >= 0.0:
 		_grid_row("Occupancy", "%.0f%%" % (float(b["occ"]) * 100.0))
+	if float(b.get("cond", -1.0)) >= 0.0:
+		_grid_row("Condition", "%.0f%%" % (float(b["cond"]) * 100.0))
 	if float(b.get("value", -1.0)) > 0.0:
 		_grid_row("Appraised", _usd(float(b["value"])))
 	var listed: bool = bool(b.get("listed", false)) and not bool(b.get("held", false))

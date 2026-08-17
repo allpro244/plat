@@ -11,7 +11,13 @@ export function buildCityDoc(E, city, g, extra = {}) {
     if (rec && rec.class !== "land") {
       const h = g.holdings[bbl];
       occ = +(h ? E.physicalOcc(rec, h) : E.occupancy(rec, g.econ)).toFixed(3);
+      // Held condIdx is live wear; everyone else gets the engine's
+      // initialCondIdx (age + spec). The renderer weathers from this —
+      // it does not invent a condition from yearBuilt.
       if (h?.condIdx != null) cond = +h.condIdx.toFixed(3);
+      else if (typeof E.initialCondIdx === "function") {
+        cond = +E.initialCondIdx(rec, g.month).toFixed(3);
+      }
     }
     // THE MONEY LINES (docs/GAME-PLAN.md phase 3.1): appraisal by the
     // engine's own assetValue, asking price by the canonical rule the
