@@ -195,7 +195,7 @@ static func build(ci: CityImport, street_mat: Material = null,
 			if ContextGen.overlay == "demand":
 				masses.set_color(ContextGen.demand_tint(float(b.get("demand", 0.0))))
 			elif ContextGen.overlay == "land":
-				masses.set_color(ContextGen.class_tint("land"))
+				masses.set_color(ContextGen.class_tint(str(b.get("cls", "land"))))
 			else:
 				masses.set_color(Color(0.32, 0.29, 0.25) * (0.9 + 0.06 * float(int(b["tone"]) % 3)))
 			_cap(masses, ring, 0.26)

@@ -89,10 +89,12 @@ static func build(seed_value: int, matlib: Dictionary, plan: CityPlan,
 static var overlay := ""
 
 ## demandScore is 0–100 in the export (city-1928: 4–96, median 21).
-## Cool slate → amber. Linear in the engine's own units.
+## Cool blue → amber, linear in the engine's own units. Saturated enough
+## that t=0.21 (the founding median) is still a readable blue-violet —
+## the previous slate→amber pair collapsed to brown there.
 static func demand_tint(score: float) -> Color:
 	var t := clampf(score / 100.0, 0.0, 1.0)
-	return Color(0.22, 0.28, 0.36).lerp(Color(0.95, 0.52, 0.16), t)
+	return Color(0.12, 0.28, 0.62).lerp(Color(1.00, 0.48, 0.06), t)
 
 
 ## Land-use colours. Class is the engine's; the hues are form.
@@ -246,20 +248,25 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 		# that IS the windowed body (first render treating every x:1 as a
 		# roof turned half the city into toneless grey prisms). Only a
 		# THIN cap sitting on a body below it is roof furniture.
+		# Map lenses paint the LID (GAME-PLAN: "flat colour over building
+		# tops"). The orbital camera looks down; a dark roof hid the
+		# choropleth on the first Demand frame.
+		var lid: Color = tint if overlay != "" else rtone
 		if b["crown"] and h < 5.0 and z0 > 3.0:
-			roof.set_color(rtone)
+			roof.set_color(lid)
 			_ring_walls(roof, ring, z0, h)
-			_ring_cap(roof, ring, z0 + h, rtone)
+			_ring_cap(roof, ring, z0 + h, lid)
 			continue
 		var sti: SurfaceTool = tw if glassy else \
 				(st if era_name == "victorian" else (st_b if era_name == "prewar" else st_c))
 		sti.set_color(Color(1, 1, 1) if glassy else tint)
 		_ring_walls(sti, ring, z0, h)
-		roof.set_color(rtone)
-		_ring_cap(roof, ring, z0 + h, rtone)
+		roof.set_color(lid)
+		_ring_cap(roof, ring, z0 + h, lid)
 		# Roof furniture only on near-rectangular main volumes: parapet
 		# boxes follow the bounding box, and on an L-plan they would float.
-		if not b["crown"] and z0 < 0.5:
+		# Skip on a map lens — HVAC boxes punch holes in the choropleth.
+		if overlay == "" and not b["crown"] and z0 < 0.5:
 			var bb := _ring_bbox(ring)
 			var bba: float = bb.size.x * bb.size.y
 			if bba > 30.0 and absf(CityImport._shoelace(ring)) / bba > 0.72:
@@ -291,11 +298,13 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			stool.generate_tangents()
 		stool.commit(mesh)
 		if entry[1] == null:
-			mats.append(_roof_material())
+			mats.append(_overlay_roof_material() if overlay != "" else _roof_material())
 		elif entry[1] == "tower":
 			var tm := _tower_material(rng2)
 			if lit_occ >= 0.0:
 				tm.set_shader_parameter("lit_fraction", lit_occ * night)
+			if overlay != "":
+				_flatten_overlay_material(tm)
 			mats.append(tm)
 		else:
 			var em := _facade_material(rng2, p_any)
@@ -306,10 +315,7 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			if lit_occ >= 0.0:
 				em.set_shader_parameter("lit_fraction", lit_occ * night)
 			if overlay != "":
-				# An overlay is a MAP: flat color reads, brick texture
-				# muting the gold does not (seen in the first overlay
-				# frame — the held parcel came out faint amber).
-				em.set_shader_parameter("use_wall_texture", 0.0)
+				_flatten_overlay_material(em)
 			mats.append(em)
 	mi.mesh = mesh
 	for i in range(mats.size()):
@@ -878,6 +884,29 @@ static func _roof_material() -> StandardMaterial3D:
 		_roof_mat.albedo_color = Color(0.34, 0.335, 0.33)
 		_roof_mat.roughness = 0.95
 	return _roof_mat
+
+
+## Map-lens lids: white albedo so the vertex tint IS the colour. The
+## default roof mat multiplies by 0.34 and would turn amber into mud.
+static var _overlay_roof_mat: StandardMaterial3D
+
+static func _overlay_roof_material() -> StandardMaterial3D:
+	if _overlay_roof_mat == null:
+		_overlay_roof_mat = StandardMaterial3D.new()
+		_overlay_roof_mat.vertex_color_use_as_albedo = true
+		_overlay_roof_mat.albedo_color = Color.WHITE
+		_overlay_roof_mat.roughness = 0.92
+	return _overlay_roof_mat
+
+
+## An overlay is a MAP: brick, windows, era base and REPAINT all mute the
+## tint (first Owners frame: held parcel came out faint amber).
+static func _flatten_overlay_material(em: ShaderMaterial) -> void:
+	em.set_shader_parameter("use_wall_texture", 0.0)
+	em.set_shader_parameter("windows_enabled", 0.0)
+	em.set_shader_parameter("map_flat", 1.0)
+	em.set_shader_parameter("base_tint", Color.WHITE)
+	em.set_shader_parameter("base_stone", 0.0)
 
 static func _block_far(st: SurfaceTool, rng: RandomNumberGenerator, b: Dictionary,
 		xf: Transform3D, plan: CityPlan) -> void:

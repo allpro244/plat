@@ -21,6 +21,9 @@ uniform vec4 wall_tint : source_color = vec4(1.0);
 uniform float use_wall_texture = 1.0;
 
 uniform float windows_enabled = 1.0;
+// Map lenses (Demand / Land / Owners / Market): flat colour, no window
+// grammar and no per-building REPAINT. The choropleth is the point.
+uniform float map_flat = 0.0;
 uniform float floor_height = 3.5;
 uniform float ground_floor_height = 4.5;
 uniform float bay_width = 3.2;
@@ -96,7 +99,7 @@ void fragment() {
 	// UV2 defaults to zero on meshes that do not author it (the hero
 	// block's curtain walls); zero means neutral multipliers.
 	float sb = vstyle.x;
-	float styled = step(0.0001, sb);
+	float styled = map_flat > 0.5 ? 0.0 : step(0.0001, sb);
 	float bw_m = mix(1.0, mix(0.72, 1.45, fract(sb * 7.13)), styled);
 	float fh_m = mix(1.0, mix(0.90, 1.12, fract(sb * 13.7)), styled);
 	float wx_m = mix(1.0, mix(0.78, 1.25, fract(sb * 29.3)), styled);
