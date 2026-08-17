@@ -47,12 +47,14 @@ export function buildCityDoc(E, city, g, extra = {}) {
       } : {}),
       ...(g.talks?.[bbl] ? { talk: 1, contracted: g.talks[bbl].agreed ? 1 : 0 } : {}),
       ...(approach ? { approach } : {}),
-      class: p.class,
-      ...(p.mix ? { mix: p.mix } : {}),
-      floors: p.floors,
+      // Live quantities: resolveRec overlays g.built. A delivered job is
+      // industrial / 2 floors even though the island cache still says land.
+      class: (rec ?? p).class,
+      ...((rec ?? p).mix ? { mix: (rec ?? p).mix } : {}),
+      floors: (rec ?? p).floors,
       lotArea: p.lotArea,
-      bldgArea: p.bldgArea,
-      yearBuilt: p.yearBuilt,
+      bldgArea: (rec ?? p).bldgArea,
+      yearBuilt: (rec ?? p).yearBuilt,
       address: p.address ?? "",
       district: p.district,
       demandScore: p.demandScore,
@@ -72,7 +74,7 @@ export function buildCityDoc(E, city, g, extra = {}) {
     stats: city.stats,
     context: city.context,
     stations: city.stations,
-    buildings3d: city.buildings3d,
+    buildings3d: applyLiveMassing(E, city, g),
     parcels,
     ...extra,
   };
@@ -139,6 +141,50 @@ function milestonePage(id) {
   if (id === "lease1") return "leasing";
   if (id === "tower1") return "property";
   return "portfolio";
+}
+
+// citygen: heightM = floors * 3.55 + jitter. Live deliveries have no jitter —
+// the storey height is the measured constant, not a look tweak.
+const STOREY_M = 3.55;
+
+/** Extrude or flatten buildings3d from the live record. The island cache is
+ *  founding geometry; a delivery is a quantity change (floors, class) and
+ *  this is the form that quantity takes. */
+export function applyLiveMassing(E, city, g) {
+  return (city.buildings3d ?? []).map((v) => {
+    if (!v.b || v.d) return { ...v };
+    const live = E.resolveRec(city.parcels, g, v.b);
+    if (!live) return { ...v };
+    const floors = Number(live.floors ?? 0);
+    const cls = live.class ?? "land";
+    const year = Number(live.yearBuilt ?? 0);
+    const vacantNow = cls === "land" || floors <= 0;
+    const vacantThen = v.c === "land" || Number(v.z1 ?? 0) <= 0.05;
+    const out = { ...v };
+    if (vacantThen && !vacantNow) {
+      out.c = cls;
+      out.f = floors;
+      out.y = year;
+      out.z0 = 0;
+      out.z1 = +(floors * STOREY_M).toFixed(2);
+      delete out.k;
+    } else if (!vacantThen && vacantNow) {
+      out.c = "land";
+      out.f = 0;
+      out.y = 0;
+      out.z1 = 0;
+      out.k = 1;
+    } else if (!vacantThen && !vacantNow && (Number(v.f) !== floors || v.c !== cls)) {
+      const oldF = Number(v.f) || 1;
+      const oldH = Number(v.z1) - Number(v.z0 ?? 0);
+      out.c = cls;
+      out.f = floors;
+      out.y = year;
+      out.z1 = +((Number(v.z0) || 0) + (oldH > 0.05 && oldF > 0
+        ? oldH * (floors / oldF) : floors * STOREY_M)).toFixed(2);
+    }
+    return out;
+  });
 }
 
 /** A holding with floors. Vacant dirt has no roll — lease1 cannot fire on it. */
