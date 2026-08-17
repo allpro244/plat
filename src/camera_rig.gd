@@ -81,6 +81,10 @@ func set_target_xz(x: float, z: float) -> void:
 	_target.z = z
 	_apply()
 
+func set_target_y(y: float) -> void:
+	_target.y = y
+	_apply()
+
 func band_name() -> String:
 	return _preset_name
 

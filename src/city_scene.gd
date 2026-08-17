@@ -99,6 +99,8 @@ func _ready() -> void:
 		rig.set_target_xz(_import.core.x, _import.core.y)
 	if params.get("target_x") != null:
 		rig.set_target_xz(float(params["target_x"]), float(params.get("target_z", 0.0)))
+	if params.get("target_y") != null:
+		rig.set_target_y(float(params["target_y"]))
 	add_child(rig)
 	rig.set_band(params["band"])
 	if params["cam_azimuth"] == null:
