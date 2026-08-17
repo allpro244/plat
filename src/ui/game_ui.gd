@@ -1402,11 +1402,7 @@ func _paint_market() -> void:
 		filters.add_child(b)
 	var hl := _lens("Highlight on map", bool(_lenses.get("listings", false)))
 	hl.pressed.connect(func() -> void:
-		var on := not bool(_lenses.get("listings", false))
-		_lenses["listings"] = on
-		if _lens_btns.has("listings"):
-			_style_btn(_lens_btns["listings"], on, false)
-		lens_pressed.emit("listings", on)
+		_toggle_lens("listings")
 		_paint_market())
 	filters.add_child(hl)
 	_note("On-market listings. Click a row to put it on the card.")
