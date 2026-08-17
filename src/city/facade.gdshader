@@ -251,11 +251,13 @@ void fragment() {
 			float wear = 1.0 - clamp(condition, 0.0, 1.0);
 			float up = clamp(y / max(vheight, 1.0), 0.0, 1.0);
 			// Street-level dirt is heavier; the crown stays closer to clean.
-			ALBEDO *= 1.0 - wear * (0.18 + 0.32 * (1.0 - up));
+			// Strength chosen so cond 0.42 (the founding worn floor) reads
+			// sooty next to cond ~0.98, without flattening the brick.
+			ALBEDO *= 1.0 - wear * (0.22 + 0.48 * (1.0 - up));
 			// A few vertical streaks — downpipes / overflow, not noise.
-			float streak = step(0.88, fract(mx * 0.37 + sb * 3.1));
-			ALBEDO *= 1.0 - wear * 0.22 * streak * (1.0 - up);
-			ROUGHNESS = mix(ROUGHNESS, 0.97, wear * 0.6);
+			float streak = step(0.86, fract(mx * 0.37 + sb * 3.1));
+			ALBEDO *= 1.0 - wear * 0.28 * streak * (1.0 - up);
+			ROUGHNESS = mix(ROUGHNESS, 0.97, wear * 0.7);
 		}
 		if (use_wall_texture > 0.5) {
 			NORMAL_MAP = texture(wall_normal, wuv).rgb;
