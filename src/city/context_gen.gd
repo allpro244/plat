@@ -275,6 +275,8 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			# constant — a vacant building goes dark because it is vacant.
 			if lit_occ >= 0.0:
 				em.set_shader_parameter("lit_fraction", lit_occ * night)
+				em.set_shader_parameter("shop_lit_fraction", lit_occ * night)
+				em.set_shader_parameter("occupancy", lit_occ)
 			if overlay != "":
 				# An overlay is a MAP: flat color reads, brick texture
 				# muting the gold does not (seen in the first overlay

@@ -86,8 +86,9 @@ grows the UI that drives it. Order chosen so each step is playable alone:
 - **Map layers** (Market / Land / Demand / Zoning / Owners / Leases): flat
   color overlays over building tops per layer, driven by exported per-parcel
   values. Renderer-only; no new engine work.
-- **Held portfolio glow**, vacancy reading at street level (already
-  occupancy-driven at dusk; add boarded shopfronts by day).
+- **Held portfolio glow**, vacancy reading at street level: dusk windows
+  follow exported occupancy; vacant ground-floor bays are boarded by day
+  (same cell hash — the window that would be dark at night is plywood at noon).
 - **Construction cranes**: a tower crane stands on every lot the sim has
   marked `developing`. Height is `devFloors` × 3.5 m. Raised on the
   develop verb without remeshing the city.
