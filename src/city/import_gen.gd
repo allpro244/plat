@@ -242,6 +242,41 @@ static func build_cranes(ci: CityImport) -> Node3D:
 	return root
 
 
+## Gold lid on every held BBL. The orbital camera looks down, so a roof
+## plate is the mark — not a facade recolor (that is the Owners lens).
+## Thin node: a buy does not remesh the city. Same gold as the owners
+## overlay (Color 0.95, 0.72, 0.18). One plate per deed, on the tallest
+## volume, so a setback tower is not a stack of lids.
+static func build_held_marks(ci: CityImport) -> Node3D:
+	var root := Node3D.new()
+	if ContextGen.overlay != "":
+		return root
+	var best := {}
+	for b in ci.buildings:
+		if not b.get("held", false) or b.get("deco", false):
+			continue
+		var bbl := str(b.get("bbl", ""))
+		if bbl == "":
+			continue
+		if not best.has(bbl) or float(b["z1"]) > float((best[bbl] as Dictionary)["z1"]):
+			best[bbl] = b
+	if best.is_empty():
+		return root
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(-1)
+	for bbl in best:
+		var b: Dictionary = best[bbl]
+		var y := maxf(float(b["z1"]), 0.26) + 0.18
+		_cap(st, b["ring"], y)
+	st.generate_normals()
+	var mat := _mat(Color(0.95, 0.72, 0.18), 0.38)
+	mat.metallic = 0.42
+	root.add_child(_mesh(st, mat))
+	print("[plat] held marks: %d deeds" % best.size())
+	return root
+
+
 static func _tower_crane(b: Dictionary, floors: int, yellow: Material,
 		steel: Material, weight: Material) -> Node3D:
 	var ring: PackedVector2Array = b["ring"]
