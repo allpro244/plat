@@ -43,6 +43,10 @@ uniform float glass_metallic : hint_range(0.0, 1.0) = 0.5;
 // go dark while walkups eat dinner, and everything is off at noon.
 uniform float lit_fraction : hint_range(0.0, 1.0) = 0.0;
 uniform float shop_lit_fraction : hint_range(0.0, 1.0) = 0.0;
+// Parcel occupancy 0–1 from the export. Default 1 (fully let) so a city
+// without occ does not grow plywood. Ground-floor bays with cell >= occupancy
+// are boarded — the same hash that leaves them dark at dusk.
+uniform float occupancy : hint_range(0.0, 1.0) = 1.0;
 uniform float win_seed = 0.0;
 // Interior tungsten ~2700K. Energy tuned against the dusk exposure by
 // render, the only way an emissive value can honestly be chosen.
@@ -148,6 +152,26 @@ void fragment() {
 		float dx = abs(fx - 0.5) / (wx * 0.5);
 		float dy = abs(fy - 0.54) / (wy * 0.5);
 		float edge = max(dx, dy);
+		// One hash per window CELL: same window, same verdict, every frame.
+		// vtint joins the seed so two masses sharing a material still get
+		// independent patterns.
+		float bay_i = floor(mx / bay_w);
+		float floor_i = floor(max(y - ground_h, -1.0) / floor_h);
+		float cell = fract(sin(dot(vec2(bay_i, floor_i), vec2(12.9898, 78.233))
+				+ win_seed + dot(vtint, vec3(17.7, 31.3, 47.1))) * 43758.5453);
+		// Boarded shopfronts by day: a vacant ground-floor bay is plywood,
+		// not empty glass. Same cell vs occupancy as dusk lighting, so the
+		// window that would be dark at night is the one that's boarded now.
+		if (y < ground_h && occupancy < 0.999 && cell >= occupancy) {
+			float plank = fract(mx * 3.4);
+			vec3 ply = vec3(0.46, 0.36, 0.24);
+			ply *= mix(0.52, 1.0, step(0.08, plank));
+			ply *= 0.86 + 0.14 * fract(sin(mx * 19.1 + y * 7.3) * 43758.5);
+			ALBEDO = ply * (0.55 + 0.45 * smoothstep(1.0, 0.75, edge));
+			if (dy > 0.74) { ALBEDO *= 0.55; }
+			ROUGHNESS = 0.95;
+			METALLIC = 0.0;
+		} else {
 		// Darken toward the frame: a punched-reveal read at aerial distance.
 		// Glass tone varies per building: depth and a warm/cool lean.
 		vec3 g = glass_color.rgb * mix(1.0, mix(0.6, 1.5, fract(sb * 97.7)), styled);
@@ -162,14 +186,6 @@ void fragment() {
 		if (dxn < 0.16) { ALBEDO *= 0.68; }       // shadowed jamb
 		ROUGHNESS = glass_roughness;
 		METALLIC = glass_metallic;
-		METALLIC = glass_metallic;
-		// One hash per window CELL: same window, same verdict, every frame.
-		// vtint joins the seed so two masses sharing a material still get
-		// independent patterns.
-		float bay_i = floor(mx / bay_w);
-		float floor_i = floor(max(y - ground_h, -1.0) / floor_h);
-		float cell = fract(sin(dot(vec2(bay_i, floor_i), vec2(12.9898, 78.233))
-				+ win_seed + dot(vtint, vec3(17.7, 31.3, 47.1))) * 43758.5453);
 		float frac = (y < ground_floor_height) ? shop_lit_fraction : lit_fraction;
 		if (cell < frac) {
 			// Tungsten interior; a second hash varies warmth and brightness
@@ -182,6 +198,7 @@ void fragment() {
 			ALBEDO = vec3(0.08, 0.06, 0.04);
 			ROUGHNESS = 0.6;
 			METALLIC = 0.0;
+		}
 		}
 	} else {
 		vec3 wall_col = mix(vec3(1.0), texture(wall_albedo, wuv).rgb, use_wall_texture);
