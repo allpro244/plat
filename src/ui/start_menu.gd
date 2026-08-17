@@ -1,6 +1,6 @@
 class_name StartMenu
 extends Control
-## Broadway & Wall start room: Continue, three dials, Break ground.
+## The start room (Broadway-and-Wall lineage): Continue, three dials, Break ground.
 ## Labels match plat-econ citygen lists. Numbers come from the runner.
 
 signal break_ground_pressed(size: String, density: String, cash: int)
@@ -59,7 +59,7 @@ func _ready() -> void:
 	margin.add_child(col)
 
 	var title := Label.new()
-	title.text = "Broadway & Wall"
+	title.text = "plat"
 	title.add_theme_font_override("font", BwTheme.serif())
 	title.add_theme_font_size_override("font_size", 34)
 	title.add_theme_color_override("font_color", Color("#f4ead2"))

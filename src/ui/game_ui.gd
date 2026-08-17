@@ -1,6 +1,6 @@
 class_name GameUi
 extends Control
-## Broadway & Wall chrome: start room, full-width bar, glance card,
+## The game chrome (Broadway-and-Wall lineage): start room, full-width bar, glance card,
 ## marketplace desk, inbox. Data from main.gd; this file paints.
 
 signal advance_pressed
@@ -165,7 +165,7 @@ func _build_topbar() -> void:
 	brand.add_theme_constant_override("separation", 0)
 	row1.add_child(brand)
 	_brand = Label.new()
-	_brand.text = "Broadway & Wall"
+	_brand.text = "plat"
 	_brand.add_theme_font_override("font", BwTheme.serif())
 	_brand.add_theme_font_size_override("font_size", 20)
 	_brand.add_theme_color_override("font_color", BwTheme.INK)
