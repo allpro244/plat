@@ -259,10 +259,69 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 			continue
 		var sti: SurfaceTool = tw if glassy else \
 				(st if era_name == "victorian" else (st_b if era_name == "prewar" else st_c))
-		sti.set_color(Color(1, 1, 1) if glassy else tint)
-		_ring_walls(sti, ring, z0, h)
-		roof.set_color(lid)
-		_ring_cap(roof, ring, z0 + h, lid)
+		var bb0 := _ring_bbox(ring)
+		var rectish: bool = bb0.size.x * bb0.size.y > 30.0 \
+				and absf(CityImport._shoelace(ring)) / (bb0.size.x * bb0.size.y) > 0.72
+		# MASSING RECIPES on the engine's real footprints (the variety pass):
+		# a tall glass office is a PODIUM + inset shaft, a tall prewar sets
+		# back at two thirds — extruded shoeboxes were most of why every
+		# building read alike. Footprint stays the engine's ring verbatim;
+		# only what rises from it is form.
+		if glassy and rectish and h > 55.0 and overlay == "" \
+				and bb0.size.x > 22.0 and bb0.size.y > 22.0:
+			var ph := rng.randf_range(9.0, 16.0)
+			var body: SurfaceTool = st_b   # street-wall podium: prewar masonry
+			body.set_color(tint)
+			_ring_walls(body, ring, z0, ph)
+			roof.set_color(rtone)
+			_ring_cap(roof, ring, z0 + ph, rtone)
+			var inx := rng.randf_range(2.5, minf(6.0, bb0.size.x * 0.18))
+			var inz := rng.randf_range(2.5, minf(6.0, bb0.size.y * 0.18))
+			sti.set_color(Color(1, 1, 1))
+			_box(sti, xf, bb0.position.x + inx, bb0.position.y + inz,
+					bb0.size.x - inx * 2.0, bb0.size.y - inz * 2.0, z0 + ph, h - ph)
+			roof.set_color(Color(0.30, 0.30, 0.31))
+			_box(roof, xf, bb0.position.x + bb0.size.x * 0.38,
+					bb0.position.y + bb0.size.y * 0.38, bb0.size.x * 0.24,
+					bb0.size.y * 0.24, z0 + h, rng.randf_range(2.5, 4.5))
+		elif not glassy and rectish and h > 26.0 and h < 90.0 and overlay == "" \
+				and era_name != "victorian" and rng.randf() < 0.55:
+			# The 1916-style setback: street wall to two thirds, then the
+			# upper mass steps in — the wedding-cake silhouette.
+			var hs := h * rng.randf_range(0.58, 0.7)
+			sti.set_color(tint)
+			_ring_walls(sti, ring, z0, hs)
+			roof.set_color(lid)
+			_ring_cap(roof, ring, z0 + hs, lid)
+			var sx := rng.randf_range(2.0, minf(4.5, bb0.size.x * 0.16))
+			var sz := rng.randf_range(2.0, minf(4.5, bb0.size.y * 0.16))
+			sti.set_color(tint * rng.randf_range(0.97, 1.03))
+			_box(sti, xf, bb0.position.x + sx, bb0.position.y + sz,
+					bb0.size.x - sx * 2.0, bb0.size.y - sz * 2.0, z0 + hs, h - hs)
+			roof.set_color(lid)
+			_top(roof, xf, bb0.position.x + sx, bb0.position.y + sz,
+					bb0.size.x - sx * 2.0, bb0.size.y - sz * 2.0, z0 + h)
+			if rng.randf() < float(ERAS[era_name]["cornice_p"]):
+				_cornice(roof, xf, bb0.position.x + sx, bb0.position.y + sz,
+						bb0.size.x - sx * 2.0, bb0.size.y - sz * 2.0, z0 + h, tint)
+		else:
+			sti.set_color(Color(1, 1, 1) if glassy else tint)
+			_ring_walls(sti, ring, z0, h)
+			roof.set_color(lid)
+			_ring_cap(roof, ring, z0 + h, lid)
+			# Victorian roof events on the real footprint: mansard slate or
+			# the NYC water tower, by the era's own probabilities.
+			if overlay == "" and rectish and not b["crown"] and z0 < 0.5 \
+					and era_name == "victorian" and h > 9.0 and h < 40.0:
+				if rng.randf() < float(ERAS["victorian"]["mansard_p"]) and bb0.size.x > 8.0:
+					roof.set_color(Color(0.12, 0.12, 0.135))
+					_taper(roof, xf, bb0.position.x + 0.2, bb0.position.y + 0.2,
+							bb0.size.x - 0.4, bb0.size.y - 0.4, z0 + h,
+							rng.randf_range(2.2, 3.2), minf(1.3, bb0.size.x * 0.12), 1.3)
+				elif rng.randf() < float(ERAS["victorian"]["wt_p"]) \
+						and bb0.size.x > 12.0 and h > 18.0:
+					_water_tower(roof, rng, bb0.position.x, bb0.position.y,
+							bb0.size.x, bb0.size.y, z0 + h, xf)
 		# Roof furniture only on near-rectangular main volumes: parapet
 		# boxes follow the bounding box, and on an L-plan they would float.
 		# Skip on a map lens — HVAC boxes punch holes in the choropleth.
