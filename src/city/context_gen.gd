@@ -88,6 +88,32 @@ static func build(seed_value: int, matlib: Dictionary, plan: CityPlan,
 ## consumed at build time — an overlay toggle is a rebuild.
 static var overlay := ""
 
+## demandScore is 0–100 in the export (city-1928: 4–96, median 21).
+## Cool slate → amber. Linear in the engine's own units.
+static func demand_tint(score: float) -> Color:
+	var t := clampf(score / 100.0, 0.0, 1.0)
+	return Color(0.22, 0.28, 0.36).lerp(Color(0.95, 0.52, 0.16), t)
+
+
+## Land-use colours. Class is the engine's; the hues are form.
+static func class_tint(cls: String) -> Color:
+	match cls:
+		"land":
+			return Color(0.55, 0.48, 0.36)
+		"office":
+			return Color(0.32, 0.48, 0.62)
+		"retail":
+			return Color(0.72, 0.42, 0.32)
+		"multifamily":
+			return Color(0.62, 0.40, 0.50)
+		"industrial":
+			return Color(0.42, 0.48, 0.34)
+		"mix":
+			return Color(0.48, 0.40, 0.58)
+		_:
+			return Color(0.42, 0.42, 0.44)
+
+
 static func build_imported(ci: CityImport, matlib: Dictionary,
 		night_factor: float) -> Node3D:
 	night = night_factor
@@ -196,6 +222,10 @@ static func _imported_chunk(ci: CityImport, indices: Array,
 				tint = Color(0.95, 0.55, 0.18)
 			else:
 				tint = Color(0.40, 0.40, 0.42)
+		elif overlay == "demand":
+			tint = demand_tint(float(b.get("demand", 0.0)))
+		elif overlay == "land":
+			tint = class_tint(cls)
 		tint.a = clampf(float(b["z1"]) / 400.0, 0.02, 1.0)
 		_uv2 = Vector2(rng.randf_range(0.001, 1.0), rng.randf_range(0.0, 37.0))
 		# Curtain wall: a tall office building of the glass era. Class and

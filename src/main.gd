@@ -1166,10 +1166,8 @@ func _on_page_opened(page: String) -> void:
 
 
 func _on_lens(name: String, on: bool) -> void:
-	if name == "owners":
-		ContextGen.overlay = "owners" if on else ""
-	elif name == "listings":
-		ContextGen.overlay = "listings" if on else ""
+	if name in ["owners", "listings", "demand", "land"]:
+		ContextGen.overlay = name if on else ""
 	else:
 		return
 	_rebuild()
@@ -1564,8 +1562,7 @@ func _update_hud() -> void:
 		help += ("\n\nPan: left-drag · Rotate/tilt: right-drag · Zoom: wheel at cursor"
 				+ "\nV free-fly · C downtown · H toggle help · Esc quit")
 	_ui.set_help(help, _help_visible)
-	_ui.set_owners_lens(ContextGen.overlay == "owners")
-	_ui.set_listings_lens(ContextGen.overlay == "listings")
+	_ui.set_overlay_lens(ContextGen.overlay)
 	if _compass:
 		var br := city.rig.bearing()
 		_compass.text = "N\n%03d°" % int(fposmod(br, 360.0))
