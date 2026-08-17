@@ -83,9 +83,9 @@ grows the UI that drives it. Order chosen so each step is playable alone:
 
 ## Phase 4 — The city shows the game state
 
-- **Map layers** (Market / Land / Demand / Zoning / Owners / Leases): flat
-  color overlays over building tops per layer, driven by exported per-parcel
-  values. Renderer-only; no new engine work.
+- **Map layers** (Market / Owners / Demand / Land): flat colour over
+  building tops and vacant slabs, from exported `listed` / `held` /
+  `demandScore` / `class`. Zoning and Leases wait on those exports.
 - **Held portfolio glow**: a gold roof plate on every deed, always on.
   Same gold as the Owners lens; the lens still recolours the whole
   mass. Vacancy reading at street level (already occupancy-driven at
