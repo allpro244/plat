@@ -846,6 +846,7 @@ func _refresh_live() -> void:
 	# Cranes are a thin node, not facade mesh. A develop verb does not
 	# change z1/floors/cls, so remesh stays false — still put the crane up.
 	city.refresh_cranes()
+	city.refresh_held_marks()
 	if remesh:
 		await _rebuild()
 		_refresh_open_page()
